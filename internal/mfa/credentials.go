@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/common/logger"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/aegis/rpc/hermes"
+	"github.com/heliantheon/common/logger"
 )
 
 // CredentialService owns MFA credential inventory operations.

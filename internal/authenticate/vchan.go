@@ -3,11 +3,11 @@ package authenticate
 import (
 	"context"
 
-	autherrors "github.com/heliannuuthus/aegis/errors"
-	"github.com/heliannuuthus/aegis/internal/authenticator"
-	"github.com/heliannuuthus/aegis/internal/authenticator/vchan"
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/common/helpers"
+	autherrors "github.com/heliantheon/aegis/errors"
+	"github.com/heliantheon/aegis/internal/authenticator"
+	"github.com/heliantheon/aegis/internal/authenticator/vchan"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/common/helpers"
 )
 
 // 编译期接口检查

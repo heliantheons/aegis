@@ -10,11 +10,11 @@ import (
 
 	"github.com/go-json-experiment/json"
 
-	"github.com/heliannuuthus/aegis/internal/authenticator/idp"
-	"github.com/heliannuuthus/aegis/internal/cache"
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/common/logger"
+	"github.com/heliantheon/aegis/internal/authenticator/idp"
+	"github.com/heliantheon/aegis/internal/cache"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/common/logger"
 )
 
 // MPProvider 微信小程序 Provider

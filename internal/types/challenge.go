@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-json-experiment/json"
 
-	"github.com/heliannuuthus/aegis-go/utilities/token"
-	"github.com/heliannuuthus/common/helpers"
+	"github.com/heliantheon/aegis-go/utilities/token"
+	"github.com/heliantheon/common/helpers"
 )
 
 // ChannelType 是 token.ChannelType 的别名

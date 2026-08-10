@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/heliannuuthus/aegis/internal/authenticator/idp"
+	"github.com/heliantheon/aegis/internal/authenticator/idp"
 )
 
 func TestValidateOAuthAuthorizationURL(t *testing.T) {

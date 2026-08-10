@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/heliannuuthus/aegis/internal/authenticator/totp"
-	"github.com/heliannuuthus/aegis/internal/authenticator/webauthn"
-	"github.com/heliannuuthus/aegis/internal/cache"
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/aegis/rpc/hermes"
+	"github.com/heliantheon/aegis/internal/authenticator/totp"
+	"github.com/heliantheon/aegis/internal/authenticator/webauthn"
+	"github.com/heliantheon/aegis/internal/cache"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/aegis/rpc/hermes"
 )
 
 // Service coordinates MFA enrollment and credential management.

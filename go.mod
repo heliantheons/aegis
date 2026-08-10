@@ -1,4 +1,4 @@
-module github.com/heliannuuthus/aegis
+module github.com/heliantheon/aegis
 
 go 1.26
 
@@ -8,7 +8,11 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433
 	github.com/go-webauthn/webauthn v0.15.0
-	github.com/heliannuuthus/proto v0.0.0-20260810151706-47dd86d80c98
+	github.com/heliantheon/aegis-go/guard v0.0.2-0.20260810161529-b6105ce3299f
+	github.com/heliantheon/aegis-go/service v0.0.2-0.20260810161529-b6105ce3299f
+	github.com/heliantheon/aegis-go/utilities v0.0.2-0.20260810161529-b6105ce3299f
+	github.com/heliantheon/common v0.0.0-20260810161551-3c268cf22a19
+	github.com/heliantheon/proto v0.0.0-20260810161524-2a92df7e5115
 	github.com/pquerna/otp v1.5.0
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.0
@@ -48,10 +52,6 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/go-tpm v0.9.6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/heliannuuthus/aegis-go/guard v0.0.2-0.20260810152503-0b75cc8e9df3
-	github.com/heliannuuthus/aegis-go/service v0.0.2-0.20260810152503-0b75cc8e9df3
-	github.com/heliannuuthus/aegis-go/utilities v0.0.2-0.20260810152503-0b75cc8e9df3
-	github.com/heliannuuthus/common v0.0.0-20260810152613-bd9e82df33d1
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect

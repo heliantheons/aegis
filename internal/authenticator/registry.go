@@ -5,8 +5,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/aegis/models"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/models"
 )
 
 // Authenticator 统一认证器接口

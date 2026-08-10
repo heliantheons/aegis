@@ -7,9 +7,9 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 
-	"github.com/heliannuuthus/aegis-go/utilities/key"
-	pasetokit "github.com/heliannuuthus/aegis-go/utilities/paseto"
-	"github.com/heliannuuthus/common/logger"
+	"github.com/heliantheon/aegis-go/utilities/key"
+	pasetokit "github.com/heliantheon/aegis-go/utilities/paseto"
+	"github.com/heliantheon/common/logger"
 )
 
 // Encryptor encrypts and decrypts data using PASETO v4.local with kid support.

@@ -5,9 +5,9 @@ This repository owns Helios authentication and authorization behavior.
 ## Boundaries
 
 - Identity persistence and provisioning belong to Hermes.
-- Reusable token, key, service, and guard packages belong to `heliannuuthus/aegis-go`.
-- Domain-independent infrastructure belongs to `heliannuuthus/common`.
-- Protocol contracts belong to `heliannuuthus/proto`.
+- Reusable token, key, service, and guard packages belong to `heliantheon/aegis-go`.
+- Domain-independent infrastructure belongs to `heliantheon/common`.
+- Protocol contracts belong to `heliantheon/proto`.
 
 ## Commands
 

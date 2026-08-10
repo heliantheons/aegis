@@ -11,10 +11,10 @@ import (
 
 	pquerna_totp "github.com/pquerna/otp/totp"
 
-	"github.com/heliannuuthus/aegis/internal/cache"
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/common/logger"
+	"github.com/heliantheon/aegis/internal/cache"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/aegis/rpc/hermes"
+	"github.com/heliantheon/common/logger"
 )
 
 const (

@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	autherrors "github.com/heliannuuthus/aegis/errors"
-	"github.com/heliannuuthus/aegis/internal/cache"
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/aegis/rpc/hermes"
+	autherrors "github.com/heliantheon/aegis/errors"
+	"github.com/heliantheon/aegis/internal/cache"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/aegis/rpc/hermes"
 )
 
 // Service 用户业务服务

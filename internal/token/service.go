@@ -8,11 +8,11 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 
-	pkgtoken "github.com/heliannuuthus/aegis-go/service"
-	"github.com/heliannuuthus/aegis-go/utilities/key"
-	tokendef "github.com/heliannuuthus/aegis-go/utilities/token"
-	"github.com/heliannuuthus/aegis/config"
-	"github.com/heliannuuthus/aegis/internal/cache"
+	pkgtoken "github.com/heliantheon/aegis-go/service"
+	"github.com/heliantheon/aegis-go/utilities/key"
+	tokendef "github.com/heliantheon/aegis-go/utilities/token"
+	"github.com/heliantheon/aegis/config"
+	"github.com/heliantheon/aegis/internal/cache"
 )
 
 // Service is the token service that handles issuing and verifying all token types.

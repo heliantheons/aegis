@@ -8,8 +8,8 @@ import (
 	"github.com/go-json-experiment/json"
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"github.com/heliannuuthus/aegis/config"
-	"github.com/heliannuuthus/common/helpers"
+	"github.com/heliantheon/aegis/config"
+	"github.com/heliantheon/common/helpers"
 )
 
 type TOTPEnrollmentSession struct {

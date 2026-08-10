@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/heliannuuthus/aegis/internal/types"
+	"github.com/heliantheon/aegis/internal/types"
 )
 
 const oauthRandomBytes = 32

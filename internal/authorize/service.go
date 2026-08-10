@@ -13,18 +13,18 @@ import (
 
 	"github.com/go-json-experiment/json"
 
-	tokendef "github.com/heliannuuthus/aegis-go/utilities/token"
-	"github.com/heliannuuthus/aegis/config"
-	autherrors "github.com/heliannuuthus/aegis/errors"
-	"github.com/heliannuuthus/aegis/internal/cache"
-	"github.com/heliannuuthus/aegis/internal/token"
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/aegis/internal/user"
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/common/async"
-	"github.com/heliannuuthus/common/helpers"
-	"github.com/heliannuuthus/common/logger"
+	tokendef "github.com/heliantheon/aegis-go/utilities/token"
+	"github.com/heliantheon/aegis/config"
+	autherrors "github.com/heliantheon/aegis/errors"
+	"github.com/heliantheon/aegis/internal/cache"
+	"github.com/heliantheon/aegis/internal/token"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/internal/user"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/aegis/rpc/hermes"
+	"github.com/heliantheon/common/async"
+	"github.com/heliantheon/common/helpers"
+	"github.com/heliantheon/common/logger"
 )
 
 // Service 授权服务

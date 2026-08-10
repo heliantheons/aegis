@@ -4,7 +4,7 @@ package factor
 import (
 	"context"
 
-	"github.com/heliannuuthus/aegis/internal/types"
+	"github.com/heliantheon/aegis/internal/types"
 )
 
 // 因子类型常量

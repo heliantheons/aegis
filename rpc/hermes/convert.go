@@ -3,8 +3,8 @@ package hermes
 import (
 	"encoding/json"
 
-	"github.com/heliannuuthus/aegis/models"
-	hermesv1 "github.com/heliannuuthus/proto/gen/proto/hermes/v1"
+	"github.com/heliantheon/aegis/models"
+	hermesv1 "github.com/heliantheon/proto/gen/proto/hermes/v1"
 )
 
 func domainFromProto(pb *hermesv1.Domain) *models.Domain {

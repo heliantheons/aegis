@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	pasetokit "github.com/heliannuuthus/aegis-go/utilities/paseto"
-	"github.com/heliannuuthus/aegis/config"
-	"github.com/heliannuuthus/aegis/models"
+	pasetokit "github.com/heliantheon/aegis-go/utilities/paseto"
+	"github.com/heliantheon/aegis/config"
+	"github.com/heliantheon/aegis/models"
 )
 
 // Key 统一密钥结构（派生后的 raw bytes）。
