@@ -111,7 +111,7 @@ func GetClientClaims(c *gin.Context) *pkgtoken.ClientToken {
 
 // --- 认证会话 ---
 
-// Authorize POST /auth/authorize
+// Authorize POST /api/authorize
 // 创建认证会话
 func (h *Handler) Authorize(c *gin.Context) {
 	var req types.AuthRequest
@@ -187,7 +187,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 
 // --- 上下文查询 ---
 
-// GetContext GET /auth/context
+// GetContext GET /api/context
 // 获取当前认证流程的应用和服务信息
 func (h *Handler) GetContext(c *gin.Context) {
 	// 从 Cookie 获取 flowID
@@ -240,7 +240,7 @@ func (h *Handler) GetContext(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// GetConnections GET /auth/connections
+// GetConnections GET /api/connections
 // 获取可用的 Connection 配置（按类型分类：idp, vchan, factor）
 func (h *Handler) GetConnections(c *gin.Context) {
 	// 从 Cookie 获取 flowID
@@ -268,7 +268,7 @@ func (h *Handler) GetConnections(c *gin.Context) {
 
 // --- 登录 ---
 
-// Login POST /auth/login
+// Login POST /api/login
 // 处理登录
 func (h *Handler) Login(c *gin.Context) {
 	var req LoginRequest
@@ -356,7 +356,7 @@ type idpInitiator interface {
 	Initiate(ctx context.Context, initiation *idp.InitiateContext, strategy string) (*idp.InitiateResponse, error)
 }
 
-// IDPs POST /auth/idps
+// IDPs POST /api/idps
 func (h *Handler) IDPs(c *gin.Context) {
 	var req IDPInitiateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -507,7 +507,7 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 
 // --- Challenge ---
 
-// InitiateChallenge POST /auth/challenge
+// InitiateChallenge POST /api/challenge
 // channel_type 支持 Exchanger → exchange 路径（code → principal → ChallengeToken）
 // 否则走标准 initiate 路径（query setting → create challenge → prerequisite → send OTP）
 func (h *Handler) InitiateChallenge(c *gin.Context) {
@@ -561,7 +561,7 @@ func (h *Handler) InitiateChallenge(c *gin.Context) {
 	})
 }
 
-// ContinueChallenge POST /auth/challenge/:cid
+// ContinueChallenge POST /api/challenge/:cid
 // Flow: load → prerequisite / main verify → issue token
 func (h *Handler) ContinueChallenge(c *gin.Context) {
 	challengeID := c.Param("cid")
@@ -597,7 +597,7 @@ func (h *Handler) ContinueChallenge(c *gin.Context) {
 
 // --- 账户关联 ---
 
-// GetIdentifyContext GET /auth/binding
+// GetIdentifyContext GET /api/binding
 // 获取识别到的已有用户信息（前端关联确认页展示用）
 func (h *Handler) GetIdentifyContext(c *gin.Context) {
 	flowID, err := getAuthSessionCookie(c)
@@ -630,7 +630,7 @@ func (h *Handler) GetIdentifyContext(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// ConfirmIdentify POST /auth/binding
+// ConfirmIdentify POST /api/binding
 // 用户确认或取消账户关联
 func (h *Handler) ConfirmIdentify(c *gin.Context) {
 	var req ConfirmIdentifyRequest
@@ -737,7 +737,7 @@ func (h *Handler) ConfirmIdentify(c *gin.Context) {
 
 // --- Token ---
 
-// Token POST /auth/token
+// Token POST /api/token
 //
 // 按 Content-Type 路由：
 //   - application/x-www-form-urlencoded：authorization_code（单/多 audience 由 flow 决定，响应分别为扁平或 keyed）+ refresh_token。
@@ -753,7 +753,7 @@ func (h *Handler) Token(c *gin.Context) {
 
 // --- 权限检查 ---
 
-// Check POST /auth/check
+// Check POST /api/check
 // 关系检查接口（使用 CT 认证）
 // 检查指定主体是否具有指定的关系权限
 // 返回：
@@ -807,7 +807,7 @@ func (h *Handler) Check(c *gin.Context) {
 
 // --- 登出与撤销 ---
 
-// Revoke POST /auth/revoke
+// Revoke POST /api/revoke
 // 撤销 Token
 func (h *Handler) Revoke(c *gin.Context) {
 	var req RevokeRequest
@@ -823,14 +823,14 @@ func (h *Handler) Revoke(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
-// Logout POST /auth/logout
+// Logout POST /api/logout
 // 登出（撤销 refresh token + 清除 SSO cookie）
 func (h *Handler) Logout(c *gin.Context) {
 	h.revokeAndClearSSO(c, h.openIDFromRequest(c))
 	c.Status(http.StatusOK)
 }
 
-// LogoutGET GET /auth/logout
+// LogoutGET GET /api/logout
 // 重定向式登出：清除 SSO cookie 后 302 到 return_to。client_id 必填，return_to 可选（缺省时用 Referer 或 allowed_origins 首个）
 func (h *Handler) LogoutGET(c *gin.Context) {
 	clientID := c.Query(QueryClientID)
@@ -865,7 +865,7 @@ func (h *Handler) LogoutGET(c *gin.Context) {
 
 // --- 公钥 ---
 
-// PublicKeys GET /pubkeys
+// PublicKeys GET /api/pubkeys
 // 获取 PASETO 公钥
 func (h *Handler) PublicKeys(c *gin.Context) {
 	clientID := c.Query(QueryClientID)
@@ -1705,7 +1705,7 @@ func getSSOCookie(c *gin.Context) (string, error) {
 //   - initialized -> login（需要登录）
 //   - authenticated -> consent（需要授权同意）
 //   - authorized/completed -> 跳转回应用
-//   - failed -> login（前端通过 /auth/context 获取错误状态）
+//   - failed -> login（前端通过 /api/context 获取错误状态）
 func forwardNext(c *gin.Context, flow *types.AuthFlow) {
 	var targetURL string
 

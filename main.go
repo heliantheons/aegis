@@ -82,9 +82,9 @@ func main() {
 
 	aegisCORS := middleware.CORS(aegisHandler.CacheManager())
 
-	authGroup := r.Group("/auth")
+	api := r.Group("/api")
 	{
-		corsRoutes := []struct {
+		authRoutes := []struct {
 			method, path string
 			handler      gin.HandlerFunc
 		}{
@@ -104,15 +104,15 @@ func main() {
 			{"GET", "/pubkeys", aegisHandler.PublicKeys},
 		}
 		registered := make(map[string]bool)
-		for _, route := range corsRoutes {
-			authGroup.Handle(route.method, route.path, aegisCORS, route.handler)
+		for _, route := range authRoutes {
+			api.Handle(route.method, route.path, aegisCORS, route.handler)
 			if !registered[route.path] {
-				authGroup.OPTIONS(route.path, aegisCORS)
+				api.OPTIONS(route.path, aegisCORS)
 				registered[route.path] = true
 			}
 		}
-		authGroup.GET("/idps/:connection/callback", aegisHandler.OAuthCallback)
-		authGroup.POST("/check", aegisHandler.Check)
+		api.GET("/idps/:connection/callback", aegisHandler.OAuthCallback)
+		api.POST("/check", aegisHandler.Check)
 	}
 
 	profile := aegisHandler.Profile()
@@ -120,7 +120,6 @@ func main() {
 	if err != nil {
 		logger.Fatalf("初始化 Iris 鉴权中间件失败: %v", err)
 	}
-	userGroup := r.Group("/user")
 	{
 		userRoutes := []struct {
 			method, path string
@@ -139,9 +138,9 @@ func main() {
 		}
 		registered := make(map[string]bool)
 		for _, route := range userRoutes {
-			userGroup.Handle(route.method, route.path, aegisCORS, irisGuard.Require(), route.handler)
+			api.Handle(route.method, route.path, aegisCORS, irisGuard.Require(), route.handler)
 			if !registered[route.path] {
-				userGroup.OPTIONS(route.path, aegisCORS)
+				api.OPTIONS(route.path, aegisCORS)
 				registered[route.path] = true
 			}
 		}

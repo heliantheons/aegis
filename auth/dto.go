@@ -55,11 +55,6 @@ func maskPrincipal(s string) string {
 	return s[:3] + "***"
 }
 
-// LoginResponse 登录响应
-type LoginResponse struct {
-	Location string `json:"location"` // 重定向地址（携带 code 和 state）
-}
-
 // IDPInitiateRequest IDP 认证入口请求
 type IDPInitiateRequest struct {
 	Connection string `json:"connection" binding:"required"`
@@ -132,7 +127,7 @@ type ServiceInfo struct {
 	Description *string `json:"description,omitempty"`
 }
 
-// AuthContextResponse 认证上下文响应（/auth/context 接口返回给前端的公开信息）
+// AuthContextResponse 认证上下文响应（/api/context 接口返回给前端的公开信息）
 type AuthContextResponse struct {
 	Application *ApplicationInfo `json:"application,omitempty"`
 	Service     *ServiceInfo     `json:"service,omitempty"`
