@@ -12,16 +12,16 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/heliannuuthus/aegis-go/guard"
+	"github.com/heliannuuthus/aegis-go/utilities/key"
 	aegisconfig "github.com/heliannuuthus/aegis/config"
 	"github.com/heliannuuthus/aegis/internal/cache"
 	"github.com/heliannuuthus/aegis/middleware"
 	"github.com/heliannuuthus/aegis/models"
 	hermesrpc "github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/pkg/aegis/guard"
-	"github.com/heliannuuthus/pkg/aegis/utilities/key"
-	"github.com/heliannuuthus/pkg/config"
-	"github.com/heliannuuthus/pkg/logger"
-	pkgredis "github.com/heliannuuthus/pkg/redis"
+	"github.com/heliannuuthus/common/config"
+	"github.com/heliannuuthus/common/logger"
+	pkgredis "github.com/heliannuuthus/common/redis"
 )
 
 func main() {

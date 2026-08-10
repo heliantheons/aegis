@@ -7,7 +7,7 @@ import (
 	"github.com/heliannuuthus/aegis/internal/authenticator"
 	"github.com/heliannuuthus/aegis/internal/authenticator/vchan"
 	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/pkg/helpers"
+	"github.com/heliannuuthus/common/helpers"
 )
 
 // 编译期接口检查

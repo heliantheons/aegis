@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/heliannuuthus/aegis-go/utilities/key"
 	"github.com/heliannuuthus/aegis/auth"
 	"github.com/heliannuuthus/aegis/config"
 	"github.com/heliannuuthus/aegis/internal/authenticate"
@@ -30,12 +31,11 @@ import (
 	"github.com/heliannuuthus/aegis/internal/user"
 	"github.com/heliannuuthus/aegis/profile"
 	"github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/pkg/accessctl"
-	"github.com/heliannuuthus/pkg/aegis/utilities/key"
-	"github.com/heliannuuthus/pkg/async"
-	"github.com/heliannuuthus/pkg/logger"
-	"github.com/heliannuuthus/pkg/mail"
-	"github.com/heliannuuthus/pkg/throttle"
+	"github.com/heliannuuthus/common/accessctl"
+	"github.com/heliannuuthus/common/async"
+	"github.com/heliannuuthus/common/logger"
+	"github.com/heliannuuthus/common/mail"
+	"github.com/heliannuuthus/common/throttle"
 )
 
 func initializeAegis(hermesClient *hermes.Client, cacheManager *cache.Manager) (*auth.Handler, error) {

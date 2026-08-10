@@ -12,12 +12,12 @@ import (
 	"github.com/go-json-experiment/json/jsontext"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/heliannuuthus/aegis-go/guard"
 	"github.com/heliannuuthus/aegis/errors"
 	"github.com/heliannuuthus/aegis/internal/mfa"
 	"github.com/heliannuuthus/aegis/models"
 	"github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/pkg/aegis/guard"
-	"github.com/heliannuuthus/pkg/patch"
+	"github.com/heliannuuthus/common/patch"
 )
 
 type Handler struct {

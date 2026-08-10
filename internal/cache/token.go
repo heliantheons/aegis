@@ -9,8 +9,8 @@ import (
 	"github.com/go-json-experiment/json"
 
 	"github.com/heliannuuthus/aegis/config"
-	"github.com/heliannuuthus/pkg/logger"
-	pkgredis "github.com/heliannuuthus/pkg/redis"
+	"github.com/heliannuuthus/common/logger"
+	pkgredis "github.com/heliannuuthus/common/redis"
 )
 
 // ==================== AuthCode（Redis）====================

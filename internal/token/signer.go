@@ -7,9 +7,9 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 
-	"github.com/heliannuuthus/pkg/aegis/utilities/key"
-	pasetokit "github.com/heliannuuthus/pkg/aegis/utilities/paseto"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/aegis-go/utilities/key"
+	pasetokit "github.com/heliannuuthus/aegis-go/utilities/paseto"
+	"github.com/heliannuuthus/common/logger"
 )
 
 // Signer signs PASETO v4.public tokens with kid footer.

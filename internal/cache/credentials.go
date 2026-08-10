@@ -9,7 +9,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/heliannuuthus/aegis/config"
-	"github.com/heliannuuthus/pkg/helpers"
+	"github.com/heliannuuthus/common/helpers"
 )
 
 type TOTPEnrollmentSession struct {

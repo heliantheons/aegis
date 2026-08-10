@@ -7,8 +7,8 @@ import (
 
 	"github.com/heliannuuthus/aegis/internal/cache"
 	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/pkg/helpers"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/helpers"
+	"github.com/heliannuuthus/common/logger"
 )
 
 var _ Provider = (*EmailOTPProvider)(nil)

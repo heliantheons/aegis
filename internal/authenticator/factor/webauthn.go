@@ -10,7 +10,7 @@ import (
 	"github.com/heliannuuthus/aegis/internal/types"
 	"github.com/heliannuuthus/aegis/models"
 	"github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/logger"
 )
 
 // WebAuthnProvider WebAuthn 认证因子 Provider

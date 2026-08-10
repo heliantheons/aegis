@@ -12,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	aegisguard "github.com/heliannuuthus/aegis-go/guard"
+	pkgtoken "github.com/heliannuuthus/aegis-go/utilities/token"
 	"github.com/heliannuuthus/aegis/config"
 	autherrors "github.com/heliannuuthus/aegis/errors"
 	"github.com/heliannuuthus/aegis/internal/authenticate"
@@ -25,11 +27,9 @@ import (
 	"github.com/heliannuuthus/aegis/internal/user"
 	"github.com/heliannuuthus/aegis/models"
 	"github.com/heliannuuthus/aegis/profile"
-	aegisguard "github.com/heliannuuthus/pkg/aegis/guard"
-	pkgtoken "github.com/heliannuuthus/pkg/aegis/utilities/token"
-	"github.com/heliannuuthus/pkg/async"
-	"github.com/heliannuuthus/pkg/helpers"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/async"
+	"github.com/heliannuuthus/common/helpers"
+	"github.com/heliannuuthus/common/logger"
 )
 
 // ==================== Handler 定义 ====================

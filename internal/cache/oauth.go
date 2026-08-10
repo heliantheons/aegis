@@ -10,7 +10,7 @@ import (
 
 	"github.com/heliannuuthus/aegis/config"
 	"github.com/heliannuuthus/aegis/internal/authenticator/idp"
-	pkgredis "github.com/heliannuuthus/pkg/redis"
+	pkgredis "github.com/heliannuuthus/common/redis"
 )
 
 // ErrOAuthTransactionNotFound indicates an invalid, expired, or already-consumed state.

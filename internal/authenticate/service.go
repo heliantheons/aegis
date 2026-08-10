@@ -12,8 +12,8 @@ import (
 	"github.com/heliannuuthus/aegis/internal/cache"
 	"github.com/heliannuuthus/aegis/internal/types"
 	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/pkg/accessctl"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/accessctl"
+	"github.com/heliannuuthus/common/logger"
 )
 
 // Service 认证服务
