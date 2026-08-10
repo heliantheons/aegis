@@ -9,8 +9,8 @@ import (
 	"github.com/go-json-experiment/json"
 
 	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/pkg/binding"
-	"github.com/heliannuuthus/pkg/helpers"
+	"github.com/heliannuuthus/common/binding"
+	"github.com/heliannuuthus/common/helpers"
 )
 
 // FlowState 认证流程状态

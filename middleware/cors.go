@@ -10,7 +10,7 @@ import (
 
 	"github.com/heliannuuthus/aegis/config"
 	"github.com/heliannuuthus/aegis/internal/cache"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/logger"
 )
 
 const (

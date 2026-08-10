@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-json-experiment/json"
 
+	tokendef "github.com/heliannuuthus/aegis-go/utilities/token"
 	"github.com/heliannuuthus/aegis/config"
 	autherrors "github.com/heliannuuthus/aegis/errors"
 	"github.com/heliannuuthus/aegis/internal/cache"
@@ -21,10 +22,9 @@ import (
 	"github.com/heliannuuthus/aegis/internal/user"
 	"github.com/heliannuuthus/aegis/models"
 	"github.com/heliannuuthus/aegis/rpc/hermes"
-	tokendef "github.com/heliannuuthus/pkg/aegis/utilities/token"
-	"github.com/heliannuuthus/pkg/async"
-	"github.com/heliannuuthus/pkg/helpers"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/async"
+	"github.com/heliannuuthus/common/helpers"
+	"github.com/heliannuuthus/common/logger"
 )
 
 // Service 授权服务

@@ -8,8 +8,8 @@ import (
 	"github.com/heliannuuthus/aegis/config"
 	"github.com/heliannuuthus/aegis/models"
 	"github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/pkg/logger"
-	pkgredis "github.com/heliannuuthus/pkg/redis"
+	"github.com/heliannuuthus/common/logger"
+	pkgredis "github.com/heliannuuthus/common/redis"
 )
 
 // 错误定义

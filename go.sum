@@ -93,6 +93,16 @@ github.com/google/go-tpm v0.9.6/go.mod h1:h9jEsEECg7gtLis0upRBQU+GhYVH6jMjrFxI8u
 github.com/google/gofuzz v1.0.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/M65Eg=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/heliannuuthus/aegis-go/guard v0.0.2-0.20260810152503-0b75cc8e9df3 h1:eMcqLH0TfEvvKdRtzFWK4K0uMZ2xB/dCPQheSxeQp8M=
+github.com/heliannuuthus/aegis-go/guard v0.0.2-0.20260810152503-0b75cc8e9df3/go.mod h1:BDygDKW9GHdvEHukPNWn8WJ8nbNoTR8aQ5l2qA2sX8Y=
+github.com/heliannuuthus/aegis-go/service v0.0.2-0.20260810152503-0b75cc8e9df3 h1:iBt24u4/sSn/rEUGwZbu04jsc+ryXkJMErkhYRvWscI=
+github.com/heliannuuthus/aegis-go/service v0.0.2-0.20260810152503-0b75cc8e9df3/go.mod h1:ySwNuNeMThizBcqPg641rOjowpeNVfJ0XwRAWRIFO44=
+github.com/heliannuuthus/aegis-go/utilities v0.0.2-0.20260810152503-0b75cc8e9df3 h1:GJzNvlDHp9Wf+kya7m9VLm+Ejlk5llaYtTNpoBbhcbc=
+github.com/heliannuuthus/aegis-go/utilities v0.0.2-0.20260810152503-0b75cc8e9df3/go.mod h1:kLk1yR1GjJXw9AOl0wxgBftBlOTKBfHrwNxOgCUDSD8=
+github.com/heliannuuthus/common v0.0.0-20260810152613-bd9e82df33d1 h1:5eDS0JaqBU2Tv9do6pVkYiUBJaUolUUCr3XNX0XyQQc=
+github.com/heliannuuthus/common v0.0.0-20260810152613-bd9e82df33d1/go.mod h1:fEBBCb+bYomk1l3pEz6Y5BGv1OIwJbUj1HW9HWiCCz4=
+github.com/heliannuuthus/proto v0.0.0-20260810151706-47dd86d80c98 h1:Jo/7lXS2GEebsQEKkkvKkMrvkstDocbr7Axq0VXT4/U=
+github.com/heliannuuthus/proto v0.0.0-20260810151706-47dd86d80c98/go.mod h1:5dpG8iDxr7Rr64Nz9cLq538bZuQEg6sBIV8HXvCdjjM=
 github.com/josharian/intern v1.0.0 h1:vlS4z54oSdjm0bgjRigI+G1HpF+tI+9rE5LLzOg8HmY=
 github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=
 github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnrnM=

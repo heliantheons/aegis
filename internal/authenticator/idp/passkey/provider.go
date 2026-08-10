@@ -10,7 +10,7 @@ import (
 	"github.com/heliannuuthus/aegis/internal/authenticator/webauthn"
 	"github.com/heliannuuthus/aegis/internal/types"
 	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/logger"
 )
 
 const (

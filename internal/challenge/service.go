@@ -8,7 +8,7 @@ import (
 	"github.com/heliannuuthus/aegis/internal/authenticator"
 	"github.com/heliannuuthus/aegis/internal/cache"
 	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/logger"
 )
 
 // Service provides atomic challenge operations.

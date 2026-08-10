@@ -21,7 +21,7 @@ import (
 	"github.com/heliannuuthus/aegis/internal/cache"
 	"github.com/heliannuuthus/aegis/internal/types"
 	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/pkg/logger"
+	"github.com/heliannuuthus/common/logger"
 )
 
 // MPProvider 抖音小程序 Provider

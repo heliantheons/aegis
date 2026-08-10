@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/heliannuuthus/aegis/internal/authenticator/idp"
-	pkgredis "github.com/heliannuuthus/pkg/redis"
+	pkgredis "github.com/heliannuuthus/common/redis"
 )
 
 type oauthRedisStub struct {
@@ -38,7 +39,12 @@ func TestOAuthTransactionIsConsumedOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Getwd() error = %v", err)
 	}
-	if err := os.Chdir("../.."); err != nil {
+	testDirectory := t.TempDir()
+	configPath := filepath.Join(testDirectory, "config.toml")
+	if err := os.WriteFile(configPath, []byte("[aegis.cache.oauth_state]\nprefix = \"test:oauth:\"\n"), 0o600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	if err := os.Chdir(testDirectory); err != nil {
 		t.Fatalf("os.Chdir() error = %v", err)
 	}
 	t.Cleanup(func() {
