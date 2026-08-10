@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/aegis/rpc/hermes"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/aegis/rpc/hermes"
 )
 
 var errIdentityUserNotFound = errors.New("user not found")

@@ -4,11 +4,11 @@ import (
 	"context"
 	"slices"
 
-	autherrors "github.com/heliannuuthus/aegis/errors"
-	"github.com/heliannuuthus/aegis/internal/authenticator"
-	"github.com/heliannuuthus/aegis/internal/cache"
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/common/logger"
+	autherrors "github.com/heliantheon/aegis/errors"
+	"github.com/heliantheon/aegis/internal/authenticator"
+	"github.com/heliantheon/aegis/internal/cache"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/common/logger"
 )
 
 // Service provides atomic challenge operations.

@@ -8,11 +8,11 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/heliannuuthus/aegis/internal/authenticator/idp"
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/aegis/rpc/hermes"
-	"github.com/heliannuuthus/common/logger"
+	"github.com/heliantheon/aegis/internal/authenticator/idp"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/aegis/rpc/hermes"
+	"github.com/heliantheon/common/logger"
 )
 
 // credential 凭证信息

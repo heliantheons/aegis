@@ -4,14 +4,14 @@ import (
 	"context"
 	"strings"
 
-	tokendef "github.com/heliannuuthus/aegis-go/utilities/token"
-	"github.com/heliannuuthus/aegis/config"
-	autherrors "github.com/heliannuuthus/aegis/errors"
-	"github.com/heliannuuthus/aegis/internal/authenticator"
-	"github.com/heliannuuthus/aegis/internal/authenticator/factor"
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/common/accessctl"
-	"github.com/heliannuuthus/common/logger"
+	tokendef "github.com/heliantheon/aegis-go/utilities/token"
+	"github.com/heliantheon/aegis/config"
+	autherrors "github.com/heliantheon/aegis/errors"
+	"github.com/heliantheon/aegis/internal/authenticator"
+	"github.com/heliantheon/aegis/internal/authenticator/factor"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/common/accessctl"
+	"github.com/heliantheon/common/logger"
 )
 
 // ChallengeTokenVerifier challenge-token 验证能力接口

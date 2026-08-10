@@ -1,6 +1,6 @@
 package idp
 
-import "github.com/heliannuuthus/aegis/config"
+import "github.com/heliantheon/aegis/config"
 
 // IDP 类型常量
 const (

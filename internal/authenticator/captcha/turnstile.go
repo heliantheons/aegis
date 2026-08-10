@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-json-experiment/json"
 
-	"github.com/heliannuuthus/common/logger"
+	"github.com/heliantheon/common/logger"
 )
 
 const (

@@ -6,11 +6,11 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/heliannuuthus/aegis/internal/authenticator/idp"
-	"github.com/heliannuuthus/aegis/internal/authenticator/webauthn"
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/common/logger"
+	"github.com/heliantheon/aegis/internal/authenticator/idp"
+	"github.com/heliantheon/aegis/internal/authenticator/webauthn"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/common/logger"
 )
 
 const (

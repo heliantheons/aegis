@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heliannuuthus/aegis/internal/authenticator/idp"
-	pkgredis "github.com/heliannuuthus/common/redis"
+	"github.com/heliantheon/aegis/internal/authenticator/idp"
+	pkgredis "github.com/heliantheon/common/redis"
 )
 
 type oauthRedisStub struct {

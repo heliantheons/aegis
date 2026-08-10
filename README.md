@@ -21,4 +21,4 @@ make lint
 make build
 ```
 
-Design notes live in [`docs/`](docs/). Shared client and guard code is maintained in [`aegis-go`](https://github.com/heliannuuthus/aegis-go).
+Design notes live in [`docs/`](docs/). Shared client and guard code is maintained in [`aegis-go`](https://github.com/heliantheon/aegis-go).

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	hermesv1 "github.com/heliannuuthus/proto/gen/proto/hermes/v1"
+	hermesv1 "github.com/heliantheon/proto/gen/proto/hermes/v1"
 )
 
 func (c *Client) GetKeys(ctx context.Context, ownerType, ownerID string) ([][]byte, error) {

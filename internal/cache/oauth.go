@@ -8,9 +8,9 @@ import (
 
 	"github.com/go-json-experiment/json"
 
-	"github.com/heliannuuthus/aegis/config"
-	"github.com/heliannuuthus/aegis/internal/authenticator/idp"
-	pkgredis "github.com/heliannuuthus/common/redis"
+	"github.com/heliantheon/aegis/config"
+	"github.com/heliantheon/aegis/internal/authenticator/idp"
+	pkgredis "github.com/heliantheon/common/redis"
 )
 
 // ErrOAuthTransactionNotFound indicates an invalid, expired, or already-consumed state.

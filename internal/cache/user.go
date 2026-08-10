@@ -3,8 +3,8 @@ package cache
 import (
 	"context"
 
-	"github.com/heliannuuthus/aegis/config"
-	"github.com/heliannuuthus/aegis/models"
+	"github.com/heliantheon/aegis/config"
+	"github.com/heliantheon/aegis/models"
 )
 
 // ==================== User（read-through 缓存）====================

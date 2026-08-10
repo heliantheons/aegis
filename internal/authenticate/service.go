@@ -6,14 +6,14 @@ import (
 
 	"github.com/go-json-experiment/json"
 
-	"github.com/heliannuuthus/aegis/config"
-	autherrors "github.com/heliannuuthus/aegis/errors"
-	"github.com/heliannuuthus/aegis/internal/authenticator"
-	"github.com/heliannuuthus/aegis/internal/cache"
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/aegis/models"
-	"github.com/heliannuuthus/common/accessctl"
-	"github.com/heliannuuthus/common/logger"
+	"github.com/heliantheon/aegis/config"
+	autherrors "github.com/heliantheon/aegis/errors"
+	"github.com/heliantheon/aegis/internal/authenticator"
+	"github.com/heliantheon/aegis/internal/cache"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/common/accessctl"
+	"github.com/heliantheon/common/logger"
 )
 
 // Service 认证服务

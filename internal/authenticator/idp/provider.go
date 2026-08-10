@@ -3,8 +3,8 @@ package idp
 import (
 	"context"
 
-	"github.com/heliannuuthus/aegis/internal/types"
-	"github.com/heliannuuthus/aegis/models"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/models"
 )
 
 // Provider IDP 提供者接口
