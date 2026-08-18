@@ -12,7 +12,6 @@ require (
 	github.com/heliantheon/aegis-go/service v0.0.2-0.20260810161529-b6105ce3299f
 	github.com/heliantheon/aegis-go/utilities v0.0.2-0.20260810161529-b6105ce3299f
 	github.com/heliantheon/common v0.0.0-20260810161551-3c268cf22a19
-	github.com/heliantheon/proto v0.0.0-20260810161524-2a92df7e5115
 	github.com/pquerna/otp v1.5.0
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.0
