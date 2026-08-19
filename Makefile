@@ -1,7 +1,7 @@
 BINARY := build/aegis
 GOLANGCI_LINT ?= golangci-lint
 
-.PHONY: build run test lint fmt tidy clean
+.PHONY: build run test lint generate check-generate fmt tidy clean
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY) .
@@ -14,6 +14,12 @@ test:
 
 lint:
 	$(GOLANGCI_LINT) run ./...
+
+generate:
+	buf generate
+
+check-generate: generate
+	@git diff --exit-code -- internal/rpc/hermes/v1
 
 fmt:
 	go fmt ./...

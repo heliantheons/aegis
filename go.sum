@@ -101,8 +101,6 @@ github.com/heliantheon/aegis-go/utilities v0.0.2-0.20260810161529-b6105ce3299f h
 github.com/heliantheon/aegis-go/utilities v0.0.2-0.20260810161529-b6105ce3299f/go.mod h1:BNzqSbsD2qI8tMliDrPCHaNuGWUzkYqmgcEBR6oK6JA=
 github.com/heliantheon/common v0.0.0-20260810161551-3c268cf22a19 h1:7U30wPyRaDTzkb+tjJbzmAjpQ1v5MPHw2y++RisH0lM=
 github.com/heliantheon/common v0.0.0-20260810161551-3c268cf22a19/go.mod h1:uDDXZvInD82oJ+NFTx6mGwrC/kE38NHdtD7M9yl4Xjs=
-github.com/heliantheon/proto v0.0.0-20260810161524-2a92df7e5115 h1:B1y9x4rXdN+hpUcpi/5SBf78NjS++fJtqIjPggDL/Nw=
-github.com/heliantheon/proto v0.0.0-20260810161524-2a92df7e5115/go.mod h1:bOjygba/IufeS+GjJcG1BMCrJyn0jAYoSkIH+A6wJ18=
 github.com/josharian/intern v1.0.0 h1:vlS4z54oSdjm0bgjRigI+G1HpF+tI+9rE5LLzOg8HmY=
 github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=
 github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnrnM=

@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	hermesv1 "github.com/heliantheon/aegis/internal/rpc/hermes/v1"
 	"github.com/heliantheon/aegis/models"
-	hermesv1 "github.com/heliantheon/proto/gen/proto/hermes/v1"
 )
 
 // ==================== User Query ====================
