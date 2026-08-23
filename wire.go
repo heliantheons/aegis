@@ -249,11 +249,16 @@ func initMailSender() (*mail.Sender, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := sender.Verify(ctx); err != nil {
-		sender.Close()
-		return nil, fmt.Errorf("验证邮件发送器失败: %w", err)
+	if verifyOptionalDependency(ctx, "[Auth] 邮件发送器", sender.Verify) {
+		logger.Infof("[Auth] 邮件连接池初始化成功: %s:%d", cfg.Host, cfg.Port)
 	}
-
-	logger.Infof("[Auth] 邮件连接池初始化成功: %s:%d", cfg.Host, cfg.Port)
 	return sender, nil
+}
+
+func verifyOptionalDependency(ctx context.Context, name string, verify func(context.Context) error) bool {
+	if err := verify(ctx); err != nil {
+		logger.Warnf("%s 预检失败，相关能力将保持降级: %v", name, err)
+		return false
+	}
+	return true
 }
