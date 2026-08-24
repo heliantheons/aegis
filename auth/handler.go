@@ -1494,12 +1494,13 @@ func (h *Handler) tokenForm(c *gin.Context) {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
-	method, secret, err := resolveTokenClientCredentials(c, &req.ClientID)
+	authentication, err := resolveTokenClientCredentials(c, &req.ClientID)
 	if err != nil {
 		h.tokenErrorResponse(c, err)
 		return
 	}
-	if err := h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, secret, method); err != nil {
+	req.ClientID, err = h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, authentication)
+	if err != nil {
 		h.tokenErrorResponse(c, err)
 		return
 	}
@@ -1535,12 +1536,13 @@ func (h *Handler) tokenMultiAudience(c *gin.Context) {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
-	method, secret, err := resolveTokenClientCredentials(c, &req.ClientID)
+	authentication, err := resolveTokenClientCredentials(c, &req.ClientID)
 	if err != nil {
 		h.tokenErrorResponse(c, err)
 		return
 	}
-	if err := h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, secret, method); err != nil {
+	req.ClientID, err = h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, authentication)
+	if err != nil {
 		h.tokenErrorResponse(c, err)
 		return
 	}
@@ -1605,45 +1607,77 @@ func (h *Handler) tokenErrorResponse(c *gin.Context, err error) {
 func resolveTokenClientCredentials(
 	c *gin.Context,
 	clientID *string,
-) (authorize.ClientAuthMethod, string, error) {
+) (authorize.ClientAuthentication, error) {
 	bodySecret, hasBodySecret := c.GetPostForm("client_secret")
 	authorization := c.GetHeader("Authorization")
 	basicID, basicSecret, hasBasic := c.Request.BasicAuth()
-	if authorization != "" && !hasBasic {
-		return "", "", autherrors.NewInvalidClient("unsupported client authentication method")
+	bearerCAT, hasCAT := tokenEndpointBearerCAT(authorization)
+	if authorization != "" && !hasBasic && !hasCAT {
+		return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("unsupported client authentication method")
 	}
 
-	if hasBasic && hasBodySecret {
-		return "", "", autherrors.NewInvalidRequest("multiple client authentication methods")
+	methodCount := 0
+	if hasBodySecret {
+		methodCount++
+	}
+	if hasBasic {
+		methodCount++
+	}
+	if hasCAT {
+		methodCount++
+	}
+	if methodCount > 1 {
+		return authorize.ClientAuthentication{}, autherrors.NewInvalidRequest("multiple client authentication methods")
 	}
 
 	if hasBodySecret {
 		if *clientID == "" {
-			return "", "", autherrors.NewInvalidClient("client_id is required")
+			return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client_id is required")
 		}
-		return authorize.ClientAuthMethodSecretPost, bodySecret, nil
+		return authorize.ClientAuthentication{
+			Method:     authorize.ClientAuthMethodSecretPost,
+			Credential: bodySecret,
+		}, nil
 	}
 
 	if hasBasic {
 		decodedID, err := url.QueryUnescape(basicID)
 		if err != nil || decodedID == "" {
-			return "", "", autherrors.NewInvalidClient("client authentication failed")
+			return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client authentication failed")
 		}
 		decodedSecret, err := url.QueryUnescape(basicSecret)
 		if err != nil {
-			return "", "", autherrors.NewInvalidClient("client authentication failed")
+			return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client authentication failed")
 		}
 		if *clientID != "" && *clientID != decodedID {
-			return "", "", autherrors.NewInvalidClient("client_id mismatch")
+			return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client_id mismatch")
 		}
 		*clientID = decodedID
-		return authorize.ClientAuthMethodSecretBasic, decodedSecret, nil
+		return authorize.ClientAuthentication{
+			Method:     authorize.ClientAuthMethodSecretBasic,
+			Credential: decodedSecret,
+		}, nil
+	}
+
+	if hasCAT {
+		return authorize.ClientAuthentication{
+			Method:     authorize.ClientAuthMethodCAT,
+			Credential: bearerCAT,
+		}, nil
 	}
 
 	if *clientID == "" {
-		return "", "", autherrors.NewInvalidClient("client_id is required")
+		return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client_id is required")
 	}
-	return authorize.ClientAuthMethodNone, "", nil
+	return authorize.ClientAuthentication{Method: authorize.ClientAuthMethodNone}, nil
+}
+
+func tokenEndpointBearerCAT(authorization string) (string, bool) {
+	scheme, credential, ok := strings.Cut(authorization, " ")
+	if !ok || !strings.EqualFold(scheme, pkgtoken.TokenTypeBearer) || credential == "" {
+		return "", false
+	}
+	return credential, true
 }
 
 // errorResponse 统一错误响应

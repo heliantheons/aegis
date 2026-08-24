@@ -213,40 +213,79 @@ func (s *Service) ExchangeToken(ctx context.Context, req *TokenRequest) (*TokenR
 	}
 }
 
-// AuthenticateClient 校验 Token Endpoint 的 OAuth 客户端身份。
-// 没有应用 seed 的客户端视为公开客户端；存在 seed 的客户端必须使用共享密钥认证。
+// AuthenticateClient 校验 Token Endpoint 的 OAuth 客户端身份并返回已认证的 client_id。
+// 没有应用 seed 的客户端视为公开客户端；存在 seed 的客户端必须使用 client secret 或 CAT 认证。
 func (s *Service) AuthenticateClient(
 	ctx context.Context,
-	clientID, clientSecret string,
-	method ClientAuthMethod,
-) error {
+	clientID string,
+	authentication ClientAuthentication,
+) (string, error) {
+	if authentication.Method == ClientAuthMethodCAT {
+		resolvedClientID, err := s.authenticateCAT(ctx, clientID, authentication.Credential)
+		if err != nil {
+			return "", err
+		}
+		clientID = resolvedClientID
+	}
+
 	if clientID == "" {
-		return autherrors.NewInvalidClient("client authentication failed")
+		return "", autherrors.NewInvalidClient("client authentication failed")
 	}
 
 	app, err := s.cache.GetApplication(ctx, clientID)
 	if err != nil {
 		logger.Warnf("[Token] 加载客户端失败 - client_id: %s, error: %v", clientID, err)
-		return autherrors.NewInvalidClient("client authentication failed")
+		return "", autherrors.NewInvalidClient("client authentication failed")
 	}
 
 	confidential := len(app.ClientSecretVerifiers) > 0
 	if !confidential {
-		if method != ClientAuthMethodNone {
-			return autherrors.NewInvalidClient("client authentication failed")
+		if authentication.Method != ClientAuthMethodNone {
+			return "", autherrors.NewInvalidClient("client authentication failed")
 		}
-		return nil
+		return clientID, nil
 	}
-	if method != ClientAuthMethodSecretBasic && method != ClientAuthMethodSecretPost {
-		return autherrors.NewInvalidClient("client authentication required")
+
+	switch authentication.Method {
+	case ClientAuthMethodCAT:
+		return clientID, nil
+	case ClientAuthMethodSecretBasic, ClientAuthMethodSecretPost:
+		if authentication.Credential == "" {
+			return "", autherrors.NewInvalidClient("client authentication failed")
+		}
+		if !clientSecretMatches(app.ClientSecretVerifiers, authentication.Credential) {
+			return "", autherrors.NewInvalidClient("client authentication failed")
+		}
+		return clientID, nil
+	default:
+		return "", autherrors.NewInvalidClient("client authentication required")
 	}
-	if clientSecret == "" {
-		return autherrors.NewInvalidClient("client authentication failed")
+}
+
+func (s *Service) authenticateCAT(ctx context.Context, requestedClientID, credential string) (string, error) {
+	if credential == "" {
+		return "", autherrors.NewInvalidClient("client authentication failed")
 	}
-	if !clientSecretMatches(app.ClientSecretVerifiers, clientSecret) {
-		return autherrors.NewInvalidClient("client authentication failed")
+	verified, err := s.tokenSvc.Verify(ctx, credential)
+	if err != nil {
+		return "", autherrors.NewInvalidClient("client authentication failed")
 	}
-	return nil
+	clientToken, ok := verified.(*tokendef.ClientToken)
+	if !ok {
+		return "", autherrors.NewInvalidClient("client authentication failed")
+	}
+	return resolveCATClientID(requestedClientID, clientToken)
+}
+
+func resolveCATClientID(requestedClientID string, clientToken *tokendef.ClientToken) (string, error) {
+	clientID := clientToken.ClientID()
+	if clientID == "" || clientToken.Issuer() != clientID || clientToken.Audience() != "aegis" {
+		return "", autherrors.NewInvalidClient("client authentication failed")
+	}
+	if requestedClientID != "" && requestedClientID != clientID {
+		return "", autherrors.NewInvalidClient("client_id mismatch")
+	}
+	return clientID, nil
 }
 
 func clientSecretMatches(verifiers [][sha256.Size]byte, clientSecret string) bool {

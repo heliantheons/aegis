@@ -170,7 +170,9 @@ Hermes 在读取接口调用时临时计算明文；Aegis 缓存派生结果的 
 
 **注意**：纯前端应用（SPA、移动端）不应持有密钥，使用 PKCE 流程。
 
-存在 Application Seed 的应用视为机密客户端，Token Endpoint 支持 `client_secret_basic` 和 `client_secret_post`；没有 Seed 的应用视为公开客户端，使用 `none` + PKCE。轮换窗口内，所有尚未过期 Seed 派生出的 client_secret 都可通过验证。
+存在 Application Seed 的应用视为机密客户端，Token Endpoint 支持 `client_secret_basic`、`client_secret_post`，也支持应用使用 Seed 派生签名密钥签发 CAT；一次请求只能选择一种客户端认证方式。没有 Seed 的应用视为公开客户端，使用 `none` + PKCE。轮换窗口内，所有尚未过期 Seed 派生出的 client_secret 和签名公钥都可用于验证。
+
+浏览器访问的 Authorization Endpoint 不接收 client secret 或 CAT。无论公开客户端还是机密客户端，授权请求都只携带公开的 `client_id`、redirect URI、PKCE 等参数；机密客户端在后端调用 Token Endpoint 时完成认证。
 
 ### 4.3 Service（服务）
 

@@ -364,6 +364,8 @@ Token 交换通过 `POST /auth/token` 端点完成，按 Content-Type 路由：
 | `application/x-www-form-urlencoded` | authorization_code（单/多由 flow 决定）+ refresh_token | 提交 code 换取 token 时**统一使用 form**，单 audience 返回扁平响应，多 audience 返回 keyed 响应，客户端按响应结构解析即可 |
 | `application/json` | client_credentials 等多 audience | 服务端凭证等场景 |
 
+客户端认证只发生在 Token Endpoint，不发生在浏览器访问的 Authorization Endpoint。存在 Application Seed 的机密客户端必须在 `client_secret_basic`、`client_secret_post` 和 Bearer CAT 中选择一种认证方式；没有 Seed 的公开客户端使用 `none`，并通过 PKCE 绑定授权请求与授权码交换。CAT 的 `iss`、`sub` 必须等于应用 ID，`aud` 必须为 `aegis`。
+
 ### 5.1 标准单 Audience Token 交换
 
 **请求**（form-urlencoded）：
