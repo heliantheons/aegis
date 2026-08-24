@@ -1494,6 +1494,16 @@ func (h *Handler) tokenForm(c *gin.Context) {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
+	method, secret, err := resolveTokenClientCredentials(c, &req.ClientID, req.ClientSecret, true)
+	if err != nil {
+		h.tokenErrorResponse(c, err)
+		return
+	}
+	if err := h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, secret, method); err != nil {
+		h.tokenErrorResponse(c, err)
+		return
+	}
+	req.ClientSecret = ""
 
 	logger.Infof("[Token] 进入 token 交换 - grant_type: %s, client_id: %s", req.GrantType, req.ClientID)
 
@@ -1525,6 +1535,15 @@ func (h *Handler) tokenMultiAudience(c *gin.Context) {
 	var req authorize.MultiAudienceTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
+		return
+	}
+	method, secret, err := resolveTokenClientCredentials(c, &req.ClientID, "", false)
+	if err != nil {
+		h.tokenErrorResponse(c, err)
+		return
+	}
+	if err := h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, secret, method); err != nil {
+		h.tokenErrorResponse(c, err)
 		return
 	}
 
@@ -1576,10 +1595,61 @@ func (h *Handler) authorizeAndGenerateCode(ctx context.Context, flow *types.Auth
 // 保留原始错误类型（如 invalid_request→400），返回 OAuth 2.0 规范的 error/error_description
 func (h *Handler) tokenErrorResponse(c *gin.Context, err error) {
 	authErr := autherrors.ToAuthError(err)
+	if authErr.Code == autherrors.CodeInvalidClient {
+		c.Header("WWW-Authenticate", `Basic realm="token"`)
+	}
 	c.JSON(authErr.HTTPStatus, gin.H{
 		"error":             authErr.Code,
 		"error_description": authErr.Description,
 	})
+}
+
+func resolveTokenClientCredentials(
+	c *gin.Context,
+	clientID *string,
+	bodySecret string,
+	allowSecretPost bool,
+) (authorize.ClientAuthMethod, string, error) {
+	authorization := c.GetHeader("Authorization")
+	basicID, basicSecret, hasBasic := c.Request.BasicAuth()
+	if authorization != "" && !hasBasic {
+		return "", "", autherrors.NewInvalidClient("unsupported client authentication method")
+	}
+
+	hasBodySecret := false
+	if allowSecretPost {
+		_, hasBodySecret = c.GetPostForm("client_secret")
+	}
+	if hasBasic && hasBodySecret {
+		return "", "", autherrors.NewInvalidRequest("multiple client authentication methods")
+	}
+
+	if hasBasic {
+		decodedID, err := url.QueryUnescape(basicID)
+		if err != nil || decodedID == "" {
+			return "", "", autherrors.NewInvalidClient("client authentication failed")
+		}
+		decodedSecret, err := url.QueryUnescape(basicSecret)
+		if err != nil {
+			return "", "", autherrors.NewInvalidClient("client authentication failed")
+		}
+		if *clientID != "" && *clientID != decodedID {
+			return "", "", autherrors.NewInvalidClient("client_id mismatch")
+		}
+		*clientID = decodedID
+		return authorize.ClientAuthMethodSecretBasic, decodedSecret, nil
+	}
+
+	if hasBodySecret {
+		if *clientID == "" {
+			return "", "", autherrors.NewInvalidClient("client_id is required")
+		}
+		return authorize.ClientAuthMethodSecretPost, bodySecret, nil
+	}
+	if *clientID == "" {
+		return "", "", autherrors.NewInvalidClient("client_id is required")
+	}
+	return authorize.ClientAuthMethodNone, "", nil
 }
 
 // errorResponse 统一错误响应

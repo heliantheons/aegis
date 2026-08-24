@@ -8,6 +8,7 @@ type TokenRequest struct {
 	Code         string `form:"code"`          // authorization_code 时必填
 	RedirectURI  string `form:"redirect_uri"`  // authorization_code 时必填
 	ClientID     string `form:"client_id"`     // 必填
+	ClientSecret string `form:"client_secret"` // client_secret_post
 	CodeVerifier string `form:"code_verifier"` // PKCE 验证器
 	RefreshToken string `form:"refresh_token"` // refresh_token grant 时必填
 }
@@ -21,6 +22,15 @@ type TokenResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 	Scope        string `json:"scope"` // 实际授予的 scope
 }
+
+// ClientAuthMethod 标识 Token Endpoint 使用的客户端认证方式。
+type ClientAuthMethod string
+
+const (
+	ClientAuthMethodNone        ClientAuthMethod = "none"
+	ClientAuthMethodSecretPost  ClientAuthMethod = "client_secret_post"
+	ClientAuthMethodSecretBasic ClientAuthMethod = "client_secret_basic"
+)
 
 // ==================== 多 audience（JSON 请求）====================
 

@@ -39,6 +39,10 @@ func NewInvalidGrant(description string) *AuthError {
 	return New(http.StatusBadRequest, CodeInvalidGrant, description)
 }
 
+func NewInvalidClient(description string) *AuthError {
+	return New(http.StatusUnauthorized, CodeInvalidClient, description)
+}
+
 func NewInvalidCredentials(description string) *AuthError {
 	return New(http.StatusUnauthorized, CodeInvalidCredentials, description)
 }
@@ -207,6 +211,7 @@ const (
 	// 400 Bad Request
 	CodeInvalidRequest     = "invalid_request"
 	CodeInvalidGrant       = "invalid_grant"
+	CodeInvalidClient      = "invalid_client"
 	CodeInvalidCredentials = "invalid_credentials"
 	CodeClientNotFound     = "client_not_found"
 	CodeServiceNotFound    = "service_not_found"
