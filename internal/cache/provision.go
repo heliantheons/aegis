@@ -39,7 +39,8 @@ type ServiceWithKey struct {
 // ApplicationWithKey aegis 内部的应用（含派生后密钥）
 type ApplicationWithKey struct {
 	models.Application
-	Keys Keys
+	Keys                  Keys
+	ClientSecretVerifiers [][32]byte `json:"-"`
 }
 
 type IDPKey struct {
@@ -433,7 +434,18 @@ func DeriveApplicationKeys(raw *models.ApplicationWithKey) (*ApplicationWithKey,
 	if err != nil {
 		return nil, err
 	}
-	result := &ApplicationWithKey{Application: raw.Application}
+	verifiers := make([][32]byte, 0, len(raw.Keys))
+	for i, seed := range raw.Keys {
+		verifier, err := deriveApplicationClientSecretVerifier(seed)
+		if err != nil {
+			return nil, fmt.Errorf("derive client secret verifier[%d]: %w", i, err)
+		}
+		verifiers = append(verifiers, verifier)
+	}
+	result := &ApplicationWithKey{
+		Application:           raw.Application,
+		ClientSecretVerifiers: verifiers,
+	}
 	if keys != nil {
 		result.Keys = *keys
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -210,6 +211,51 @@ func (s *Service) ExchangeToken(ctx context.Context, req *TokenRequest) (*TokenR
 	default:
 		return nil, autherrors.NewInvalidRequestf("unsupported grant type: %s", req.GrantType)
 	}
+}
+
+// AuthenticateClient 校验 Token Endpoint 的 OAuth 客户端身份。
+// 没有应用 seed 的客户端视为公开客户端；存在 seed 的客户端必须使用共享密钥认证。
+func (s *Service) AuthenticateClient(
+	ctx context.Context,
+	clientID, clientSecret string,
+	method ClientAuthMethod,
+) error {
+	if clientID == "" {
+		return autherrors.NewInvalidClient("client authentication failed")
+	}
+
+	app, err := s.cache.GetApplication(ctx, clientID)
+	if err != nil {
+		logger.Warnf("[Token] 加载客户端失败 - client_id: %s, error: %v", clientID, err)
+		return autherrors.NewInvalidClient("client authentication failed")
+	}
+
+	confidential := len(app.ClientSecretVerifiers) > 0
+	if !confidential {
+		if method != ClientAuthMethodNone {
+			return autherrors.NewInvalidClient("client authentication failed")
+		}
+		return nil
+	}
+	if method != ClientAuthMethodSecretBasic && method != ClientAuthMethodSecretPost {
+		return autherrors.NewInvalidClient("client authentication required")
+	}
+	if clientSecret == "" {
+		return autherrors.NewInvalidClient("client authentication failed")
+	}
+	if !clientSecretMatches(app.ClientSecretVerifiers, clientSecret) {
+		return autherrors.NewInvalidClient("client authentication failed")
+	}
+	return nil
+}
+
+func clientSecretMatches(verifiers [][sha256.Size]byte, clientSecret string) bool {
+	actual := sha256.Sum256([]byte(clientSecret))
+	matched := 0
+	for _, expected := range verifiers {
+		matched |= subtle.ConstantTimeCompare(actual[:], expected[:])
+	}
+	return matched == 1
 }
 
 // ExchangeAuthCodeForm 授权码交换（form 请求，单/多 audience 由 flow 决定）

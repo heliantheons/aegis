@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-Aegis 采用 **Seed-based KDF** 密钥架构，所有密钥材料统一存储为 48 字节的 Seed，运行时通过 Argon2id 派生出签名密钥和加密密钥。
+Aegis 采用 **Seed-based KDF** 密钥架构，所有密钥材料统一存储为 48 字节的 Seed，运行时通过 Argon2id 按不同 purpose 派生签名密钥、加密密钥和 client secret。
 
 ### 1.1 设计目标
 
@@ -68,7 +68,7 @@ Seed = CSPRNG(48)
 
 ### 3.1 算法选择
 
-**Argon2id** — 当前最推荐的密码哈希/密钥派生算法，兼具抗 GPU 和抗侧信道攻击能力。
+**Argon2id** — 用于从 Seed 的 key material 派生不同用途的子密钥，兼具抗 GPU 和抗侧信道攻击能力。
 
 ### 3.2 参数配置
 
@@ -99,6 +99,7 @@ derived_key = Argon2id(
 |---------|-----|----------|
 | 签名 | `"sign"` | Ed25519 Seed (32B) → 私钥 (64B) |
 | 加密 | `"encrypt"` | PASETO v4 对称密钥 (32B) |
+| 客户端认证 | `"basic"` | client_secret (32B) |
 
 ### 3.5 派生流程
 
@@ -117,6 +118,16 @@ derived_key = Argon2id(
 1. salt = Seed.Salt + "encrypt"
 2. symmetric_key = Argon2id(Seed.Key, salt, ...)
 ```
+
+**client_secret 派生**：
+
+```
+salt = Seed.Salt + "basic"
+secret = Argon2id(Seed.Key, salt, ...)
+client_secret = Base64URL-NoPadding(secret)
+```
+
+Hermes 在读取接口调用时临时计算明文；Aegis 缓存派生结果的 SHA-256 verifier，并使用常量时间比较验证客户端输入。
 
 ---
 
@@ -155,8 +166,11 @@ derived_key = Argon2id(
 |------|------------|
 | 签发 CAT | `key` → 签名私钥 |
 | 验证 CAT | `key` → 公钥 |
+| 客户端认证 | `key` → client_secret / verifier |
 
 **注意**：纯前端应用（SPA、移动端）不应持有密钥，使用 PKCE 流程。
+
+存在 Application Seed 的应用视为机密客户端，Token Endpoint 支持 `client_secret_basic` 和 `client_secret_post`；没有 Seed 的应用视为公开客户端，使用 `none` + PKCE。轮换窗口内，所有尚未过期 Seed 派生出的 client_secret 都可通过验证。
 
 ### 4.3 Service（服务）
 
