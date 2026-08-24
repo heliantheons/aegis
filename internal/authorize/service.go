@@ -262,32 +262,6 @@ func (s *Service) AuthenticateClient(
 	}
 }
 
-func (s *Service) authenticateCAT(ctx context.Context, requestedClientID, credential string) (string, error) {
-	if credential == "" {
-		return "", autherrors.NewInvalidClient("client authentication failed")
-	}
-	verified, err := s.tokenSvc.Verify(ctx, credential)
-	if err != nil {
-		return "", autherrors.NewInvalidClient("client authentication failed")
-	}
-	clientToken, ok := verified.(*tokendef.ClientToken)
-	if !ok {
-		return "", autherrors.NewInvalidClient("client authentication failed")
-	}
-	return resolveCATClientID(requestedClientID, clientToken)
-}
-
-func resolveCATClientID(requestedClientID string, clientToken *tokendef.ClientToken) (string, error) {
-	clientID := clientToken.ClientID()
-	if clientID == "" || clientToken.Issuer() != clientID || clientToken.Audience() != "aegis" {
-		return "", autherrors.NewInvalidClient("client authentication failed")
-	}
-	if requestedClientID != "" && requestedClientID != clientID {
-		return "", autherrors.NewInvalidClient("client_id mismatch")
-	}
-	return clientID, nil
-}
-
 func clientSecretMatches(verifiers [][sha256.Size]byte, clientSecret string) bool {
 	actual := sha256.Sum256([]byte(clientSecret))
 	matched := 0
@@ -412,6 +386,32 @@ func (s *Service) GetPublicKey(ctx context.Context, clientID string) (*PublicKey
 		Main: main,
 		Keys: keyInfos,
 	}, nil
+}
+
+func (s *Service) authenticateCAT(ctx context.Context, requestedClientID, credential string) (string, error) {
+	if credential == "" {
+		return "", autherrors.NewInvalidClient("client authentication failed")
+	}
+	verified, err := s.tokenSvc.Verify(ctx, credential)
+	if err != nil {
+		return "", autherrors.NewInvalidClient("client authentication failed")
+	}
+	clientToken, ok := verified.(*tokendef.ClientToken)
+	if !ok {
+		return "", autherrors.NewInvalidClient("client authentication failed")
+	}
+	return resolveCATClientID(requestedClientID, clientToken)
+}
+
+func resolveCATClientID(requestedClientID string, clientToken *tokendef.ClientToken) (string, error) {
+	clientID := clientToken.ClientID()
+	if clientID == "" || clientToken.Issuer() != clientID || clientToken.Audience() != "aegis" {
+		return "", autherrors.NewInvalidClient("client authentication failed")
+	}
+	if requestedClientID != "" && requestedClientID != clientID {
+		return "", autherrors.NewInvalidClient("client_id mismatch")
+	}
+	return clientID, nil
 }
 
 func (s *Service) resolveAuthCodeFlow(ctx context.Context, req *TokenRequest) (*types.AuthFlow, string, error) {

@@ -1609,24 +1609,11 @@ func resolveTokenClientCredentials(
 	clientID *string,
 ) (authorize.ClientAuthentication, error) {
 	bodySecret, hasBodySecret := c.GetPostForm("client_secret")
-	authorization := c.GetHeader("Authorization")
-	basicID, basicSecret, hasBasic := c.Request.BasicAuth()
-	bearerCAT, hasCAT := tokenEndpointBearerCAT(authorization)
-	if authorization != "" && !hasBasic && !hasCAT {
-		return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("unsupported client authentication method")
+	headerAuthentication, hasHeaderAuthentication, err := resolveTokenAuthorizationHeader(c, clientID)
+	if err != nil {
+		return authorize.ClientAuthentication{}, err
 	}
-
-	methodCount := 0
-	if hasBodySecret {
-		methodCount++
-	}
-	if hasBasic {
-		methodCount++
-	}
-	if hasCAT {
-		methodCount++
-	}
-	if methodCount > 1 {
+	if hasBodySecret && hasHeaderAuthentication {
 		return authorize.ClientAuthentication{}, autherrors.NewInvalidRequest("multiple client authentication methods")
 	}
 
@@ -1639,37 +1626,50 @@ func resolveTokenClientCredentials(
 			Credential: bodySecret,
 		}, nil
 	}
+	if hasHeaderAuthentication {
+		return headerAuthentication, nil
+	}
+	if *clientID == "" {
+		return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client_id is required")
+	}
+	return authorize.ClientAuthentication{Method: authorize.ClientAuthMethodNone}, nil
+}
 
-	if hasBasic {
+func resolveTokenAuthorizationHeader(
+	c *gin.Context,
+	clientID *string,
+) (authorize.ClientAuthentication, bool, error) {
+	authorization := c.GetHeader("Authorization")
+	if authorization == "" {
+		return authorize.ClientAuthentication{}, false, nil
+	}
+
+	if basicID, basicSecret, ok := c.Request.BasicAuth(); ok {
 		decodedID, err := url.QueryUnescape(basicID)
 		if err != nil || decodedID == "" {
-			return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client authentication failed")
+			return authorize.ClientAuthentication{}, false, autherrors.NewInvalidClient("client authentication failed")
 		}
 		decodedSecret, err := url.QueryUnescape(basicSecret)
 		if err != nil {
-			return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client authentication failed")
+			return authorize.ClientAuthentication{}, false, autherrors.NewInvalidClient("client authentication failed")
 		}
 		if *clientID != "" && *clientID != decodedID {
-			return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client_id mismatch")
+			return authorize.ClientAuthentication{}, false, autherrors.NewInvalidClient("client_id mismatch")
 		}
 		*clientID = decodedID
 		return authorize.ClientAuthentication{
 			Method:     authorize.ClientAuthMethodSecretBasic,
 			Credential: decodedSecret,
-		}, nil
+		}, true, nil
 	}
 
-	if hasCAT {
+	if bearerCAT, ok := tokenEndpointBearerCAT(authorization); ok {
 		return authorize.ClientAuthentication{
 			Method:     authorize.ClientAuthMethodCAT,
 			Credential: bearerCAT,
-		}, nil
+		}, true, nil
 	}
-
-	if *clientID == "" {
-		return authorize.ClientAuthentication{}, autherrors.NewInvalidClient("client_id is required")
-	}
-	return authorize.ClientAuthentication{Method: authorize.ClientAuthMethodNone}, nil
+	return authorize.ClientAuthentication{}, false, autherrors.NewInvalidClient("unsupported client authentication method")
 }
 
 func tokenEndpointBearerCAT(authorization string) (string, bool) {
