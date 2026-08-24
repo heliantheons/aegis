@@ -33,12 +33,12 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 	t.Run("none", func(t *testing.T) {
 		context := tokenContext(url.Values{"client_id": {"public-app"}})
 		clientID := "public-app"
-		method, secret, err := resolveTokenClientCredentials(context, &clientID)
+		authentication, err := resolveTokenClientCredentials(context, &clientID)
 		if err != nil {
 			t.Fatalf("resolveTokenClientCredentials() error = %v", err)
 		}
-		if method != authorize.ClientAuthMethodNone || secret != "" || clientID != "public-app" {
-			t.Fatalf("unexpected credentials: method=%q secret=%q client_id=%q", method, secret, clientID)
+		if authentication.Method != authorize.ClientAuthMethodNone || authentication.Credential != "" || clientID != "public-app" {
+			t.Fatalf("unexpected credentials: method=%q credential=%q client_id=%q", authentication.Method, authentication.Credential, clientID)
 		}
 	})
 
@@ -48,12 +48,12 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 			"client_secret": {"post-secret"},
 		})
 		clientID := "grafana"
-		method, secret, err := resolveTokenClientCredentials(context, &clientID)
+		authentication, err := resolveTokenClientCredentials(context, &clientID)
 		if err != nil {
 			t.Fatalf("resolveTokenClientCredentials() error = %v", err)
 		}
-		if method != authorize.ClientAuthMethodSecretPost || secret != "post-secret" {
-			t.Fatalf("unexpected credentials: method=%q secret=%q", method, secret)
+		if authentication.Method != authorize.ClientAuthMethodSecretPost || authentication.Credential != "post-secret" {
+			t.Fatalf("unexpected credentials: method=%q credential=%q", authentication.Method, authentication.Credential)
 		}
 	})
 
@@ -61,12 +61,25 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 		context := tokenContext(nil)
 		context.Request.SetBasicAuth(url.QueryEscape("grafana client"), url.QueryEscape("s+e/cret"))
 		clientID := ""
-		method, secret, err := resolveTokenClientCredentials(context, &clientID)
+		authentication, err := resolveTokenClientCredentials(context, &clientID)
 		if err != nil {
 			t.Fatalf("resolveTokenClientCredentials() error = %v", err)
 		}
-		if method != authorize.ClientAuthMethodSecretBasic || secret != "s+e/cret" || clientID != "grafana client" {
-			t.Fatalf("unexpected credentials: method=%q secret=%q client_id=%q", method, secret, clientID)
+		if authentication.Method != authorize.ClientAuthMethodSecretBasic || authentication.Credential != "s+e/cret" || clientID != "grafana client" {
+			t.Fatalf("unexpected credentials: method=%q credential=%q client_id=%q", authentication.Method, authentication.Credential, clientID)
+		}
+	})
+
+	t.Run("cat", func(t *testing.T) {
+		context := tokenContext(nil)
+		context.Request.Header.Set("Authorization", "Bearer v4.public.cat")
+		clientID := ""
+		authentication, err := resolveTokenClientCredentials(context, &clientID)
+		if err != nil {
+			t.Fatalf("resolveTokenClientCredentials() error = %v", err)
+		}
+		if authentication.Method != authorize.ClientAuthMethodCAT || authentication.Credential != "v4.public.cat" || clientID != "" {
+			t.Fatalf("unexpected credentials: method=%q credential=%q client_id=%q", authentication.Method, authentication.Credential, clientID)
 		}
 	})
 
@@ -77,9 +90,25 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 		})
 		context.Request.SetBasicAuth("grafana", "basic-secret")
 		clientID := "grafana"
-		_, _, err := resolveTokenClientCredentials(context, &clientID)
+		_, err := resolveTokenClientCredentials(context, &clientID)
 		if err == nil {
 			t.Fatal("resolveTokenClientCredentials() accepted multiple authentication methods")
+		}
+		if got := autherrors.ToAuthError(err).Code; got != autherrors.CodeInvalidRequest {
+			t.Fatalf("error code = %q, want %q", got, autherrors.CodeInvalidRequest)
+		}
+	})
+
+	t.Run("rejects client secret and cat", func(t *testing.T) {
+		context := tokenContext(url.Values{
+			"client_id":     {"grafana"},
+			"client_secret": {"post-secret"},
+		})
+		context.Request.Header.Set("Authorization", "Bearer v4.public.cat")
+		clientID := "grafana"
+		_, err := resolveTokenClientCredentials(context, &clientID)
+		if err == nil {
+			t.Fatal("resolveTokenClientCredentials() accepted client secret and CAT")
 		}
 		if got := autherrors.ToAuthError(err).Code; got != autherrors.CodeInvalidRequest {
 			t.Fatalf("error code = %q, want %q", got, autherrors.CodeInvalidRequest)
@@ -90,7 +119,7 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 		context := tokenContext(url.Values{"client_id": {"other"}})
 		context.Request.SetBasicAuth("grafana", "secret")
 		clientID := "other"
-		_, _, err := resolveTokenClientCredentials(context, &clientID)
+		_, err := resolveTokenClientCredentials(context, &clientID)
 		if err == nil {
 			t.Fatal("resolveTokenClientCredentials() accepted a mismatched client id")
 		}

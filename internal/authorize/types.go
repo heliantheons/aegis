@@ -7,7 +7,7 @@ type TokenRequest struct {
 	GrantType    string `form:"grant_type" binding:"required,oneof=authorization_code refresh_token"`
 	Code         string `form:"code"`          // authorization_code 时必填
 	RedirectURI  string `form:"redirect_uri"`  // authorization_code 时必填
-	ClientID     string `form:"client_id"`     // 必填
+	ClientID     string `form:"client_id"`     // 未使用客户端认证时必填
 	CodeVerifier string `form:"code_verifier"` // PKCE 验证器
 	RefreshToken string `form:"refresh_token"` // refresh_token grant 时必填
 }
@@ -29,7 +29,15 @@ const (
 	ClientAuthMethodNone        ClientAuthMethod = "none"
 	ClientAuthMethodSecretPost  ClientAuthMethod = "client_secret_post"
 	ClientAuthMethodSecretBasic ClientAuthMethod = "client_secret_basic"
+	ClientAuthMethodCAT         ClientAuthMethod = "cat"
 )
+
+// ClientAuthentication 表示一次 Token Endpoint 客户端认证。
+// Credential 按 Method 分别承载 client_secret 或 CAT，单次请求只能选择一种方式。
+type ClientAuthentication struct {
+	Method     ClientAuthMethod
+	Credential string
+}
 
 // ==================== 多 audience（JSON 请求）====================
 
@@ -44,7 +52,7 @@ type MultiAudienceTokenRequest struct {
 	GrantType    string                    `json:"grant_type" binding:"required,oneof=authorization_code"`
 	Code         string                    `json:"code" binding:"required"`
 	RedirectURI  string                    `json:"redirect_uri,omitempty"`
-	ClientID     string                    `json:"client_id" binding:"required"`
+	ClientID     string                    `json:"client_id,omitempty"` // 未使用客户端认证时必填
 	CodeVerifier string                    `json:"code_verifier,omitempty"`
 	Audiences    map[string]*AudienceScope `json:"audiences,omitempty"` // 可选，优先使用授权阶段存储在 flow 中的 audiences
 }
