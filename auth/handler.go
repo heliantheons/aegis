@@ -1494,7 +1494,7 @@ func (h *Handler) tokenForm(c *gin.Context) {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
-	method, secret, err := resolveTokenClientCredentials(c, &req.ClientID, req.ClientSecret, true)
+	method, secret, err := resolveTokenClientCredentials(c, &req.ClientID)
 	if err != nil {
 		h.tokenErrorResponse(c, err)
 		return
@@ -1503,8 +1503,6 @@ func (h *Handler) tokenForm(c *gin.Context) {
 		h.tokenErrorResponse(c, err)
 		return
 	}
-	req.ClientSecret = ""
-
 	logger.Infof("[Token] 进入 token 交换 - grant_type: %s, client_id: %s", req.GrantType, req.ClientID)
 
 	if req.GrantType == authorize.GrantTypeAuthorizationCode {
@@ -1537,7 +1535,7 @@ func (h *Handler) tokenMultiAudience(c *gin.Context) {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
-	method, secret, err := resolveTokenClientCredentials(c, &req.ClientID, "", false)
+	method, secret, err := resolveTokenClientCredentials(c, &req.ClientID)
 	if err != nil {
 		h.tokenErrorResponse(c, err)
 		return
@@ -1607,21 +1605,23 @@ func (h *Handler) tokenErrorResponse(c *gin.Context, err error) {
 func resolveTokenClientCredentials(
 	c *gin.Context,
 	clientID *string,
-	bodySecret string,
-	allowSecretPost bool,
 ) (authorize.ClientAuthMethod, string, error) {
+	bodySecret, hasBodySecret := c.GetPostForm("client_secret")
 	authorization := c.GetHeader("Authorization")
 	basicID, basicSecret, hasBasic := c.Request.BasicAuth()
 	if authorization != "" && !hasBasic {
 		return "", "", autherrors.NewInvalidClient("unsupported client authentication method")
 	}
 
-	hasBodySecret := false
-	if allowSecretPost {
-		_, hasBodySecret = c.GetPostForm("client_secret")
-	}
 	if hasBasic && hasBodySecret {
 		return "", "", autherrors.NewInvalidRequest("multiple client authentication methods")
+	}
+
+	if hasBodySecret {
+		if *clientID == "" {
+			return "", "", autherrors.NewInvalidClient("client_id is required")
+		}
+		return authorize.ClientAuthMethodSecretPost, bodySecret, nil
 	}
 
 	if hasBasic {
@@ -1640,12 +1640,6 @@ func resolveTokenClientCredentials(
 		return authorize.ClientAuthMethodSecretBasic, decodedSecret, nil
 	}
 
-	if hasBodySecret {
-		if *clientID == "" {
-			return "", "", autherrors.NewInvalidClient("client_id is required")
-		}
-		return authorize.ClientAuthMethodSecretPost, bodySecret, nil
-	}
 	if *clientID == "" {
 		return "", "", autherrors.NewInvalidClient("client_id is required")
 	}
