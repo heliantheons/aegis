@@ -33,7 +33,7 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 	t.Run("none", func(t *testing.T) {
 		context := tokenContext(url.Values{"client_id": {"public-app"}})
 		clientID := "public-app"
-		method, secret, err := resolveTokenClientCredentials(context, &clientID, "", true)
+		method, secret, err := resolveTokenClientCredentials(context, &clientID)
 		if err != nil {
 			t.Fatalf("resolveTokenClientCredentials() error = %v", err)
 		}
@@ -48,7 +48,7 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 			"client_secret": {"post-secret"},
 		})
 		clientID := "grafana"
-		method, secret, err := resolveTokenClientCredentials(context, &clientID, "post-secret", true)
+		method, secret, err := resolveTokenClientCredentials(context, &clientID)
 		if err != nil {
 			t.Fatalf("resolveTokenClientCredentials() error = %v", err)
 		}
@@ -61,7 +61,7 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 		context := tokenContext(nil)
 		context.Request.SetBasicAuth(url.QueryEscape("grafana client"), url.QueryEscape("s+e/cret"))
 		clientID := ""
-		method, secret, err := resolveTokenClientCredentials(context, &clientID, "", true)
+		method, secret, err := resolveTokenClientCredentials(context, &clientID)
 		if err != nil {
 			t.Fatalf("resolveTokenClientCredentials() error = %v", err)
 		}
@@ -77,7 +77,7 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 		})
 		context.Request.SetBasicAuth("grafana", "basic-secret")
 		clientID := "grafana"
-		_, _, err := resolveTokenClientCredentials(context, &clientID, "post-secret", true)
+		_, _, err := resolveTokenClientCredentials(context, &clientID)
 		if err == nil {
 			t.Fatal("resolveTokenClientCredentials() accepted multiple authentication methods")
 		}
@@ -90,7 +90,7 @@ func TestResolveTokenClientCredentials(t *testing.T) {
 		context := tokenContext(url.Values{"client_id": {"other"}})
 		context.Request.SetBasicAuth("grafana", "secret")
 		clientID := "other"
-		_, _, err := resolveTokenClientCredentials(context, &clientID, "", true)
+		_, _, err := resolveTokenClientCredentials(context, &clientID)
 		if err == nil {
 			t.Fatal("resolveTokenClientCredentials() accepted a mismatched client id")
 		}
