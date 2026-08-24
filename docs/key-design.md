@@ -99,7 +99,7 @@ derived_key = Argon2id(
 |---------|-----|----------|
 | 签名 | `"sign"` | Ed25519 Seed (32B) → 私钥 (64B) |
 | 加密 | `"encrypt"` | PASETO v4 对称密钥 (32B) |
-| 客户端认证 | `"basic"` | client_secret (32B) |
+| 客户端认证 | `"client-secret"` | client_secret (32B) |
 
 ### 3.5 派生流程
 
@@ -122,7 +122,7 @@ derived_key = Argon2id(
 **client_secret 派生**：
 
 ```
-salt = Seed.Salt + "basic"
+salt = Seed.Salt + "client-secret"
 secret = Argon2id(Seed.Key, salt, ...)
 client_secret = Base64URL-NoPadding(secret)
 ```

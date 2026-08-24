@@ -8,7 +8,7 @@ import (
 	pasetokit "github.com/heliantheon/aegis-go/utilities/paseto"
 )
 
-const applicationClientSecretPurpose = "basic"
+const applicationClientSecretPurpose = "client-secret"
 
 func deriveApplicationClientSecretVerifier(seed []byte) ([sha256.Size]byte, error) {
 	if len(seed) != 48 {

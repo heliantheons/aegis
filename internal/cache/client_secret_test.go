@@ -24,7 +24,7 @@ func TestDeriveApplicationClientSecretVerifier(t *testing.T) {
 	if first == ([sha256.Size]byte{}) {
 		t.Fatal("deriveApplicationClientSecretVerifier() returned an empty verifier")
 	}
-	want := sha256.Sum256([]byte("G24kZfyp4aI6VIrms1ghmjMMuMA0vvEWkR5pEAU_UUY"))
+	want := sha256.Sum256([]byte("5TSHOjfPvWkRKtg_IBoVtw0dq-8YKt6rVjUFxdo3J1k"))
 	if first != want {
 		t.Fatal("derived verifier does not match the protocol test vector")
 	}
