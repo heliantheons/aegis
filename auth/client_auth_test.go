@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -14,11 +15,16 @@ import (
 
 func tokenContext(form url.Values) *gin.Context {
 	recorder := httptest.NewRecorder()
-	context, _ := gin.CreateTestContext(recorder)
-	request := httptest.NewRequest("POST", "/api/token", strings.NewReader(form.Encode()))
+	ginContext, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequestWithContext(
+		context.Background(),
+		"POST",
+		"/api/token",
+		strings.NewReader(form.Encode()),
+	)
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	context.Request = request
-	return context
+	ginContext.Request = request
+	return ginContext
 }
 
 func TestResolveTokenClientCredentials(t *testing.T) {
