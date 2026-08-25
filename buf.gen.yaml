@@ -1,6 +1,6 @@
 version: v2
 inputs:
-  - git_repo: https://github.com/heliantheon/hermes.git
+  - git_repo: https://github.com/heliantheons/hermes.git
     tag: schema/v1.0.0
     subdir: proto
 managed:
