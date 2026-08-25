@@ -44,6 +44,6 @@ jobs:
       contents: read
     with:
       version: '${{ needs.ci.outputs.version }}'
-      updates: 'aegis/overlay/release.yaml=ghcr.io/heliantheon/aegis'
+      updates: 'aegis/overlay/release.yaml=ghcr.io/heliantheons/aegis'
     secrets:
       gitops_token: '${{ secrets.GITOPS_TOKEN }}'

@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: aegis
-          image: ghcr.io/heliantheon/aegis:unreleased
+          image: ghcr.io/heliantheons/aegis:unreleased
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
