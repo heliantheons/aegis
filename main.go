@@ -30,11 +30,7 @@ func main() {
 		Debug:  config.IsDebug(),
 	})
 	defer logger.Sync()
-	shutdownTracing, err := observability.Init(context.Background(), observability.Config{ServiceName: "aegis"})
-	if err != nil {
-		logger.Warnf("初始化 OpenTelemetry 失败，链路追踪保持降级: %v", err)
-	}
-	defer shutdownTracing()
+	defer initTracing()()
 	if err := aegisconfig.Validate(); err != nil {
 		logger.Fatalf("Aegis 配置校验失败: %v", err)
 	}
@@ -160,6 +156,14 @@ func main() {
 	if err := r.Run(addr); err != nil {
 		logger.Fatalf("服务启动失败: %v", err)
 	}
+}
+
+func initTracing() func() {
+	shutdown, err := observability.Init(context.Background(), observability.Config{ServiceName: "aegis"})
+	if err != nil {
+		logger.Warnf("初始化 OpenTelemetry 失败，链路追踪保持降级: %v", err)
+	}
+	return shutdown
 }
 
 func initTokenManager() error {
