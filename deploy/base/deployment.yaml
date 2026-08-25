@@ -47,6 +47,14 @@ spec:
           env:
             - name: HERMES_GRPC_ADDR
               value: hermes:50051
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://alloy.observability-system.svc.cluster.local:4317
+            - name: OTEL_TRACES_SAMPLER
+              value: parentbased_traceidratio
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.25"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: deployment.environment.name=production,k8s.cluster.name=heliantheon-k3s
           envFrom:
             - secretRef:
                 name: aegis-runtime
@@ -97,4 +105,3 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
-
