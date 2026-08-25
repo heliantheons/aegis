@@ -16,8 +16,8 @@ import (
 const (
 	wildcard             = "*"
 	defaultAllowMethods  = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-	defaultAllowHeaders  = "Content-Type, Authorization, X-Requested-With"
-	defaultExposeHeaders = "Location"
+	defaultAllowHeaders  = "Content-Type, Authorization, X-Requested-With, traceparent, tracestate, baggage"
+	defaultExposeHeaders = "Location, X-Trace-ID"
 	defaultMaxAge        = "86400"
 
 	headerOrigin           = "Origin"

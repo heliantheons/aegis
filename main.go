@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -17,6 +18,7 @@ import (
 	hermesrpc "github.com/heliantheon/aegis/rpc/hermes"
 	"github.com/heliantheon/common/config"
 	"github.com/heliantheon/common/logger"
+	"github.com/heliantheon/common/observability"
 	pkgredis "github.com/heliantheon/common/redis"
 )
 
@@ -28,6 +30,7 @@ func main() {
 		Debug:  config.IsDebug(),
 	})
 	defer logger.Sync()
+	defer initTracing()()
 	if err := aegisconfig.Validate(); err != nil {
 		logger.Fatalf("Aegis 配置校验失败: %v", err)
 	}
@@ -36,7 +39,11 @@ func main() {
 	if hermesAddr == "" {
 		hermesAddr = "hermes:50051"
 	}
-	conn, err := grpc.NewClient(hermesAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		hermesAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(observability.GRPCClientStatsHandler()),
+	)
 	if err != nil {
 		logger.Fatalf("连接 hermes gRPC 失败: %v", err)
 	}
@@ -68,7 +75,9 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(observability.GinMiddleware("aegis")...)
+	r.Use(gin.Recovery())
 	r.RedirectTrailingSlash = false
 
 	r.GET("/health", func(c *gin.Context) {
@@ -147,6 +156,14 @@ func main() {
 	if err := r.Run(addr); err != nil {
 		logger.Fatalf("服务启动失败: %v", err)
 	}
+}
+
+func initTracing() func() {
+	shutdown, err := observability.Init(context.Background(), observability.Config{ServiceName: "aegis"})
+	if err != nil {
+		logger.Warnf("初始化 OpenTelemetry 失败，链路追踪保持降级: %v", err)
+	}
+	return shutdown
 }
 
 func initTokenManager() error {
