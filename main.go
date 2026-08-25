@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -13,11 +11,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/heliantheon/aegis-go/guard"
-	"github.com/heliantheon/aegis-go/utilities/key"
 	aegisconfig "github.com/heliantheon/aegis/config"
 	"github.com/heliantheon/aegis/internal/cache"
 	"github.com/heliantheon/aegis/middleware"
-	"github.com/heliantheon/aegis/models"
 	hermesrpc "github.com/heliantheon/aegis/rpc/hermes"
 	"github.com/heliantheon/common/config"
 	"github.com/heliantheon/common/logger"
@@ -48,7 +44,7 @@ func main() {
 
 	client := hermesrpc.New(conn)
 
-	if err := initTokenManager(client); err != nil {
+	if err := initTokenManager(); err != nil {
 		logger.Fatalf("初始化 Aegis token manager 失败: %v", err)
 	}
 
@@ -153,30 +149,16 @@ func main() {
 	}
 }
 
-func initTokenManager(client *hermesrpc.Client) error {
+func initTokenManager() error {
 	endpoint := aegisconfig.GetIssuer()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	keys, err := client.GetKeys(ctx, models.KeyOwnerDomain, "consumer")
+	audience := aegisconfig.GetIrisAudience()
+	seed, err := aegisconfig.GetIrisSecretKeyBytes()
 	if err != nil {
-		return fmt.Errorf("预加载 consumer 域密钥: %w", err)
+		return fmt.Errorf("加载 Iris 服务密钥: %w", err)
 	}
-	if len(keys) == 0 {
-		return fmt.Errorf("consumer 域密钥不存在")
-	}
-	if len(keys[0]) != 48 {
-		return fmt.Errorf("consumer 域密钥长度错误: 期望 48 字节, 实际 %d 字节", len(keys[0]))
-	}
-	seed := key.SingleOf(func(_ context.Context, _ string) ([]byte, error) {
-		keys, err := client.GetKeys(context.Background(), models.KeyOwnerDomain, "consumer")
-		if err != nil {
-			return nil, err
-		}
-		if len(keys) == 0 {
-			return nil, fmt.Errorf("no domain keys found")
-		}
-		return keys[0], nil
-	})
-	guard.NewTokenManager(endpoint, seed)
-	return nil
+	return configureProfileTokenManager(endpoint, audience, seed)
+}
+
+func configureProfileTokenManager(endpoint, audience string, seed []byte) error {
+	return guard.NewServiceTokenManager(endpoint, audience, seed)
 }
