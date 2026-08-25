@@ -43,19 +43,16 @@ func (*Provider) Type() string {
 
 // Login 验证账号密码
 // proof: password（明文密码）
-// params[0]: identifier（用户名/邮箱/手机号）
-// params[1]: strategy（认证方式，当前仅支持 password）
+// params[0]: appID（由 IDPAuthenticator 注入，Staff 不使用）
+// params[1]: identifier（用户名/邮箱/手机号）
+// params[2]: strategy（认证方式，当前仅支持 password）
 func (p *Provider) Login(ctx context.Context, proof string, params ...any) (*models.TUserInfo, error) {
 	if proof == "" {
 		return nil, errors.New("password is required")
 	}
 
-	if len(params) < 1 {
-		return nil, errors.New("identifier is required")
-	}
-
-	identifier, ok := params[0].(string)
-	if !ok || identifier == "" {
+	identifier, ok := idp.LoginPrincipal(params...)
+	if !ok {
 		return nil, errors.New("identifier must be a non-empty string")
 	}
 

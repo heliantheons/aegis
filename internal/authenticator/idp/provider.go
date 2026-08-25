@@ -14,7 +14,7 @@ type Provider interface {
 
 	// Login 执行登录认证
 	// proof: 认证凭证（OAuth code / password / OTP code）
-	// params: 额外参数（如 identifier）
+	// params: appID、principal、strategy、uid（由 IDPAuthenticator 依次注入）
 	// 返回: 第三方 IDP 用户信息的通用模型
 	Login(ctx context.Context, proof string, params ...any) (*models.TUserInfo, error)
 
@@ -30,6 +30,15 @@ type Provider interface {
 	// Prepare 准备前端所需的公开配置（不含密钥）
 	// 返回 ConnectionConfig，包含 connection 标识和可选的 identifier（如 client_id）
 	Prepare() *types.ConnectionConfig
+}
+
+// LoginPrincipal returns the principal injected by IDPAuthenticator.
+func LoginPrincipal(params ...any) (string, bool) {
+	if len(params) < 2 {
+		return "", false
+	}
+	principal, ok := params[1].(string)
+	return principal, ok && principal != ""
 }
 
 // Initiator 是 IDP 的认证入口能力。
