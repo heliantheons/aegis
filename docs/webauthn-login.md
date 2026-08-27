@@ -604,7 +604,7 @@ Challenge 验证（`challenge/service.go`）有独立的访问控制链：
 
 ### 13.1 Auth Context API
 
-#### `GET /auth/context` — 获取当前认证上下文
+#### `GET /api/context` — 获取当前认证上下文
 
 响应：
 
@@ -613,7 +613,8 @@ Challenge 验证（`challenge/service.go`）有独立的访问控制链：
   "application": {
     "domain_id": "platform",
     "app_id": "piris",
-    "name": "平台个人中心"
+    "name": "平台个人中心",
+    "description": "Heliantheon 平台个人资料与安全设置。"
   },
   "service": {
     "domain_id": "platform",
@@ -623,12 +624,16 @@ Challenge 验证（`challenge/service.go`）有独立的访问控制链：
 }
 ```
 
-| 字段                    | 类型                   | 说明                                                       |
-| ----------------------- | ---------------------- | ---------------------------------------------------------- |
-| `application.domain_id` | `platform \| consumer` | 当前 AuthFlow 的业务域，用于选择 `aegis:passkey:${domain}` |
-| `service.domain_id`     | `platform \| consumer` | 当前客户端上下文中服务的有效业务域                         |
+| 字段                      | 类型                   | 说明                                                       |
+| ------------------------- | ---------------------- | ---------------------------------------------------------- |
+| `application.domain_id`   | `platform \| consumer` | 当前 AuthFlow 的业务域，用于选择 `aegis:passkey:${domain}` |
+| `application.description` | `string?`              | 应用品牌与用途说明，登录页副标题使用该字段                 |
+| `service.domain_id`       | `platform \| consumer` | 当前客户端上下文中服务的有效业务域                         |
 
 需要继承客户端域的服务在底层以 `domain_id = "-"` 存储，但该占位值不对 API 暴露。Aegis 返回 Context 时使用当前 Application 的 `domain_id` 解析有效服务域：`piris + iris` 返回 `platform`，`ciris + iris` 返回 `consumer`。
+
+登录页必须使用 `application.description` 描述正在登录的客户端。多 audience
+授权中的 `service` 仅表示当前认证流程选中的服务上下文，不适合作为应用品牌文案。
 
 缺少 `application` 或 `domain_id` 时，前端不得猜测 domain，应跳过 Welcome Back 遮盖层并继续提供普通登录与手动 Passkey 入口。
 
