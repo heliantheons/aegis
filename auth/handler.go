@@ -212,15 +212,20 @@ func (h *Handler) GetContext(c *gin.Context) {
 	// 为 aegis-session cookie 续期
 	setAuthSessionCookie(c, flowID)
 
-	// 构建响应
+	resp := newAuthContextResponse(flow)
+	c.JSON(http.StatusOK, resp)
+}
+
+func newAuthContextResponse(flow *types.AuthFlow) *AuthContextResponse {
 	resp := &AuthContextResponse{}
 
 	if flow.Application != nil {
 		resp.Application = &ApplicationInfo{
-			DomainID: flow.Application.DomainID,
-			AppID:    flow.Application.AppID,
-			Name:     flow.Application.Name,
-			LogoURL:  flow.Application.LogoURL,
+			DomainID:    flow.Application.DomainID,
+			AppID:       flow.Application.AppID,
+			Name:        flow.Application.Name,
+			Description: flow.Application.Description,
+			LogoURL:     flow.Application.LogoURL,
 		}
 	}
 
@@ -237,7 +242,7 @@ func (h *Handler) GetContext(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, resp)
+	return resp
 }
 
 // GetConnections GET /api/connections
