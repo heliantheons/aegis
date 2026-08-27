@@ -8,6 +8,8 @@ This repository owns Helios authentication and authorization behavior.
 - Reusable token, key, service, and guard packages belong to `heliantheon/aegis-go`.
 - Domain-independent infrastructure belongs to `heliantheon/common`.
 - Hermes protocol contracts belong to `heliantheon/hermes`; Aegis generates private client bindings from a fixed Schema tag.
+- Kubernetes desired state belongs to the private `heliantheons/applications`
+  repository. This public repository owns the image, not deployment manifests.
 
 ## Commands
 
