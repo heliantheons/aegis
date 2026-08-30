@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,11 +120,7 @@ func (s *Service) CheckIdentityRequirements(ctx context.Context, flow *types.Aut
 	if flow.User == nil {
 		return autherrors.NewFlowInvalid("user not set in flow")
 	}
-	if flow.Service == nil {
-		return nil
-	}
-
-	requiredIdentities := flow.Service.GetRequiredIdentities()
+	requiredIdentities := requiredIdentityTypes(flow)
 	if len(requiredIdentities) == 0 {
 		return nil
 	}
@@ -150,6 +147,27 @@ func (s *Service) CheckIdentityRequirements(ctx context.Context, flow *types.Aut
 	}
 
 	return nil
+}
+
+func requiredIdentityTypes(flow *types.AuthFlow) []string {
+	services := flow.Services
+	if len(services) == 0 && flow.Service != nil {
+		services = []models.Service{*flow.Service}
+	}
+
+	requiredSet := make(map[string]struct{})
+	for i := range services {
+		for _, identityType := range services[i].GetRequiredIdentities() {
+			requiredSet[identityType] = struct{}{}
+		}
+	}
+
+	required := make([]string, 0, len(requiredSet))
+	for identityType := range requiredSet {
+		required = append(required, identityType)
+	}
+	slices.Sort(required)
+	return required
 }
 
 // ComputeGrantedScopes 计算授权的 scope 交集

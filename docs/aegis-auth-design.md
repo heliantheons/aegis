@@ -66,7 +66,7 @@ Handler (编排层)
 客户端 (Atlas)              Aegis (Helios)              Aegis-UI (登录页)
 
 1. POST /auth/authorize
-   (client_id, audience,
+   (client_id, audience|audiences,
     scope, redirect_uri,
     code_challenge, state)
    ═══════════════════════►
@@ -87,7 +87,8 @@ Handler (编排层)
 
                             3. GET /auth/context
                             ◄═══════════════════════════════
-                            返回应用/服务信息
+                            单 audience 返回 application/service
+                            多 audience 返回 application/services
                             ═══════════════════════════════►
 
                             [可选] POST /auth/challenge
@@ -134,12 +135,14 @@ Authorize 是认证流程的起点，负责创建 AuthFlow 认证会话。
 
 **请求格式**：
 - Method: POST
-- Content-Type: application/x-www-form-urlencoded
+- 单 audience 使用 `application/x-www-form-urlencoded`
+- 多 audience 使用 `application/json`
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | client_id | 是 | 应用 ID |
-| audience | 是 | 目标服务 ID |
+| audience | 二选一 | 单 audience 目标服务 ID |
+| audiences | 二选一 | 多 audience 配置，key 为服务 ID，value 为该服务的 scope 配置 |
 | response_type | 是 | 固定 "code" |
 | scope | 是 | 请求的 scope（如 "openid profile email offline_access"） |
 | code_challenge | 是 | PKCE Code Challenge（S256） |
@@ -153,8 +156,8 @@ Authorize 是认证流程的起点，负责创建 AuthFlow 认证会话。
 **处理流程**：
 
 1. 验证 Application（client_id 有效）
-2. 验证 Service（audience 有效）
-3. 验证 Application-Service 关系
+2. 根据 `audience`/`audiences` 的实际数据形态选择单或多 audience 流程，不保存额外模式标记
+3. 查询全部目标 Service，并逐个验证 Application-Service 关系
 4. SSO 快速路径检查（详见 [SSO 机制](#8-sso-机制)）
 5. 获取应用 IDP 配置
 6. 构建 AuthFlow（设置 ConnectionMap）
@@ -210,7 +213,8 @@ type AuthFlow struct {
 
     Request      *AuthRequest                   // OAuth2 请求参数
     Application  *models.ApplicationWithKey     // 应用信息
-    Service      *models.ServiceWithKey         // 目标服务信息
+    Service      *models.Service                // 单 audience 目标服务
+    Services     []models.Service               // 多 audience 目标服务（按 service_id 排序）
     User         *models.UserWithDecrypted      // 已认证用户
     Identify     *models.TUserInfo              // IDP 身份信息（未绑定）
 
@@ -411,6 +415,9 @@ Token 交换通过 `POST /auth/token` 端点完成，按 Content-Type 路由：
 ### 6.1 设计思路
 
 - **Authorize 阶段**：单 audience 指定 `audience`，多 audience 指定 `audiences`
+- **流程识别**：后端根据请求中实际存在的 `audience` 或 `audiences` 判断流程，不使用模式标记位；两者必须且只能出现一个
+- **认证上下文**：单 audience 返回 `service`，多 audience 返回按 `service_id` 排序的 `services`
+- **身份要求**：单 audience 检查目标 Service；多 audience 检查所有目标 Service required identities 的并集
 - **Token 交换**：authorization_code 统一使用 `application/x-www-form-urlencoded`，单/多 audience 由 flow 决定，响应分别为扁平或 keyed
 - **application/json**：保留给 client_credentials 等多 audience 场景
 
@@ -457,6 +464,8 @@ audiences 从 flow 获取（授权阶段已指定），无需在 token 请求中
 | 独立签发 | 每个 audience 获得独立的 access_token，footer 中的用户信息按各自 scope 决定 |
 | 独立 Refresh Token | 如果某个 audience 的 scope 包含 `offline_access`，该 audience 签发独立的 refresh_token |
 | 关系验证 | 每个 audience 都要验证 Application-Service 关系 |
+| Context 形态 | 单 audience 为 `service`，多 audience 为 `services`；两者共享 `application` |
+| 身份要求 | 多 audience 合并所有 Service 的 required identities，去重后统一检查 |
 | scope 默认值 | 不指定 scope 时默认 `openid` |
 | 请求格式 | authorization_code 统一使用 form，单/多由 flow 决定 |
 
