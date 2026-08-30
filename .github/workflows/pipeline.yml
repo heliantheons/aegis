@@ -44,7 +44,7 @@ jobs:
       contents: read
     with:
       version: '${{ needs.ci.outputs.version }}'
-      updates: 'apps/aegis/release.yaml=ghcr.io/heliantheons/aegis'
+      updates: 'deploy/01/aegis/release.yaml=ghcr.io/heliantheons/aegis'
       gitops_app_id: '4727462'
     secrets:
       gitops_app_private_key: '${{ secrets.GITOPS_APP_PRIVATE_KEY }}'
