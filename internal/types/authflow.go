@@ -46,6 +46,7 @@ type AuthFlow struct {
 	// 实体信息（认证过程中填充，不含密钥）
 	Application *models.Application       `json:"application,omitempty"`
 	Service     *models.Service           `json:"service,omitempty"`
+	Services    []models.Service          `json:"services,omitempty"`
 	User        *models.UserWithDecrypted `json:"user,omitempty"`     // 系统中的已有用户（identify 匹配到的 / 认证完成后的）
 	Identify    *models.TUserInfo         `json:"identify,omitempty"` // 当前 IDP 认证返回的身份信息（未绑定，用于 Account Linking 匹配）
 
@@ -79,12 +80,11 @@ type RequestAudienceScope struct {
 	Scope string `json:"scope"`
 }
 
-// AuthRequest 认证请求参数
-type AuthRequest struct {
+// AuthorizeRequestBase 单、多 audience 授权请求共享的 OAuth/OIDC 参数。
+type AuthorizeRequestBase struct {
 	// OAuth2 标准参数
 	ResponseType        string                 `json:"response_type" form:"response_type" binding:"required"`
 	ClientID            string                 `json:"client_id" form:"client_id" binding:"required"`
-	Audience            string                 `json:"audience,omitempty" form:"audience"`
 	RedirectURI         string                 `json:"redirect_uri" form:"redirect_uri" binding:"required"`
 	CodeChallenge       string                 `json:"code_challenge" form:"code_challenge"`
 	CodeChallengeMethod string                 `json:"code_challenge_method" form:"code_challenge_method"`
@@ -95,6 +95,14 @@ type AuthRequest struct {
 	Prompt    binding.SpaceDelimited `json:"prompt,omitempty" form:"prompt"`         // none, login, consent
 	Nonce     string                 `json:"nonce,omitempty" form:"nonce"`           // 防重放攻击
 	LoginHint string                 `json:"login_hint,omitempty" form:"login_hint"` // 登录提示（邮箱/手机）
+}
+
+// AuthRequest 认证请求参数。具体流程由 audience/audiences 的实际数据形态决定。
+type AuthRequest struct {
+	AuthorizeRequestBase
+
+	// 单 audience 参数
+	Audience string `json:"audience,omitempty" form:"audience"`
 
 	// 多 audience 扩展（授权阶段指定，token 交换时使用）
 	Audiences map[string]*RequestAudienceScope `json:"audiences,omitempty" form:"-"`

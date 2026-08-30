@@ -126,10 +126,22 @@ type ServiceInfo struct {
 	ServiceID   string  `json:"service_id"`
 	Name        string  `json:"name"`
 	Description *string `json:"description,omitempty"`
+	LogoURL     *string `json:"logo_url,omitempty"`
 }
 
-// AuthContextResponse 认证上下文响应（/api/context 接口返回给前端的公开信息）
-type AuthContextResponse struct {
+// AuthContextBase 单、多 audience 认证上下文共享的信息。
+type AuthContextBase struct {
 	Application *ApplicationInfo `json:"application,omitempty"`
-	Service     *ServiceInfo     `json:"service,omitempty"`
+}
+
+// SingleAudienceContext 单 audience 认证上下文。
+type SingleAudienceContext struct {
+	AuthContextBase
+	Service *ServiceInfo `json:"service,omitempty"`
+}
+
+// MultiAudienceContext 多 audience 认证上下文。
+type MultiAudienceContext struct {
+	AuthContextBase
+	Services []ServiceInfo `json:"services"`
 }

@@ -144,7 +144,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	svc, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
+	services, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
 	if authErr != nil {
 		h.authorizeErrorResponse(c, authErr)
 		return
@@ -162,7 +162,11 @@ func (h *Handler) Authorize(c *gin.Context) {
 
 	flow := types.NewAuthFlow(&req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
 	flow.Application = &app.Application
-	flow.Service = &svc.Service
+	if len(req.Audiences) > 0 {
+		flow.Services = services
+	} else {
+		flow.Service = &services[0]
+	}
 	flow.SetConnectionMap(h.authenticateSvc.SetConnections(idpConfigs))
 
 	if !req.Prompt.Contains(types.PromptLogin) {
@@ -212,37 +216,7 @@ func (h *Handler) GetContext(c *gin.Context) {
 	// 为 aegis-session cookie 续期
 	setAuthSessionCookie(c, flowID)
 
-	resp := newAuthContextResponse(flow)
-	c.JSON(http.StatusOK, resp)
-}
-
-func newAuthContextResponse(flow *types.AuthFlow) *AuthContextResponse {
-	resp := &AuthContextResponse{}
-
-	if flow.Application != nil {
-		resp.Application = &ApplicationInfo{
-			DomainID:    flow.Application.DomainID,
-			AppID:       flow.Application.AppID,
-			Name:        flow.Application.Name,
-			Description: flow.Application.Description,
-			LogoURL:     flow.Application.LogoURL,
-		}
-	}
-
-	if flow.Service != nil {
-		serviceDomainID := flow.Service.DomainID
-		if serviceDomainID == models.InheritedDomainID && flow.Application != nil {
-			serviceDomainID = flow.Application.DomainID
-		}
-		resp.Service = &ServiceInfo{
-			DomainID:    serviceDomainID,
-			ServiceID:   flow.Service.ServiceID,
-			Name:        flow.Service.Name,
-			Description: flow.Service.Description,
-		}
-	}
-
-	return resp
+	c.JSON(http.StatusOK, buildAuthContext(flow))
 }
 
 // GetConnections GET /api/connections
@@ -997,10 +971,11 @@ func collectAudiences(req *types.AuthRequest) ([]string, *autherrors.AuthError) 
 	for aud := range req.Audiences {
 		audiences = append(audiences, aud)
 	}
+	slices.Sort(audiences)
 	return audiences, nil
 }
 
-func (h *Handler) validateAudiences(ctx context.Context, clientID string, audiences []string) (*cache.ServiceWithKey, *autherrors.AuthError) {
+func (h *Handler) validateAudiences(ctx context.Context, clientID string, audiences []string) ([]models.Service, *autherrors.AuthError) {
 	relations, err := h.cache.GetAppServiceRelations(ctx, clientID)
 	if err != nil {
 		return nil, autherrors.NewServerError("check relation failed")
@@ -1010,20 +985,64 @@ func (h *Handler) validateAudiences(ctx context.Context, clientID string, audien
 		allowedSet[rel.ServiceID] = true
 	}
 
-	var svc *cache.ServiceWithKey
-	for i, aud := range audiences {
+	services := make([]models.Service, 0, len(audiences))
+	for _, aud := range audiences {
 		s, err := h.cache.GetService(ctx, aud)
 		if err != nil {
 			return nil, autherrors.NewServiceNotFoundf("service not found: %s", aud)
 		}
-		if i == 0 {
-			svc = s
-		}
 		if !allowedSet[aud] {
 			return nil, autherrors.NewAccessDeniedf("application %s has no access to service %s", clientID, aud)
 		}
+		services = append(services, s.Service)
 	}
-	return svc, nil
+	return services, nil
+}
+
+func buildAuthContext(flow *types.AuthFlow) any {
+	base := AuthContextBase{}
+	if flow.Application != nil {
+		base.Application = &ApplicationInfo{
+			DomainID:    flow.Application.DomainID,
+			AppID:       flow.Application.AppID,
+			Name:        flow.Application.Name,
+			Description: flow.Application.Description,
+			LogoURL:     flow.Application.LogoURL,
+		}
+	}
+
+	if flow.Request != nil && len(flow.Request.Audiences) > 0 {
+		services := flow.Services
+		if len(services) == 0 && flow.Service != nil {
+			services = []models.Service{*flow.Service}
+		}
+		infos := make([]ServiceInfo, 0, len(services))
+		for i := range services {
+			infos = append(infos, buildServiceInfo(&services[i], flow.Application))
+		}
+		return MultiAudienceContext{AuthContextBase: base, Services: infos}
+	}
+
+	var service *ServiceInfo
+	if flow.Service != nil {
+		info := buildServiceInfo(flow.Service, flow.Application)
+		service = &info
+	}
+	return SingleAudienceContext{AuthContextBase: base, Service: service}
+}
+
+func buildServiceInfo(service *models.Service, application *models.Application) ServiceInfo {
+	domainID := service.DomainID
+	if domainID == models.InheritedDomainID && application != nil {
+		domainID = application.DomainID
+	}
+	return ServiceInfo{
+		DomainID:    domainID,
+		ServiceID:   service.ServiceID,
+		Name:        service.Name,
+		Description: service.Description,
+		LogoURL:     service.LogoURL,
+	}
 }
 
 // trySSOFastPath 尝试 SSO 快速路径：如果用户有有效 SSO 会话，直接签发授权码并重定向。
