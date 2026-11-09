@@ -8,9 +8,9 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433
 	github.com/go-webauthn/webauthn v0.15.0
-	github.com/heliantheon/aegis-go/guard v0.0.2-0.20260810161529-b6105ce3299f
-	github.com/heliantheon/aegis-go/service v0.0.2-0.20260810161529-b6105ce3299f
-	github.com/heliantheon/aegis-go/utilities v0.0.2-0.20260810161529-b6105ce3299f
+	github.com/heliantheon/aegis-go/guard v0.0.2
+	github.com/heliantheon/aegis-go/service v0.0.2
+	github.com/heliantheon/aegis-go/utilities v0.0.2
 	github.com/heliantheon/common v0.0.0-20260825100603-d0159ef384e7
 	github.com/pquerna/otp v1.5.0
 	github.com/swaggo/files v1.0.1
