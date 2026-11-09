@@ -69,6 +69,7 @@ v4.public.<payload>.<footer>
 
 | Claim | 使用者 | 说明 |
 |-------|--------|------|
+| `token_type` | SAT | 显式令牌种类，固定为 `sat`，包含在签名内 |
 | `cli` | UAT, SAT, XAT, SSO | 应用/签发者 ID |
 | `scope` | UAT, SAT | 授权范围（空格分隔） |
 | `ctp` | XAT | 验证方式（ChannelType） |
@@ -211,6 +212,7 @@ kid    = h + base64url(d)    // 总长 51 字符
 
 ```json
 {
+  "token_type": "sat",
   "iss": "https://aegis.heliannuuthus.com/api",
   "cli": "app_123456",
   "aud": "service_789",
@@ -226,7 +228,7 @@ kid    = h + base64url(d)    // 总长 51 字符
 **特性**
 
 - 推荐有效期 1-24 小时
-- 无用户信息，无 sub
+- 无用户信息；可选 `sub` 仅表示服务主体，不进入 UAT 的身份解密流程
 - 适用于后台任务、微服务调用
 
 ---
@@ -405,10 +407,11 @@ d. 匹配成功 → ParseV4Public 验签
 ### 7.1 判断逻辑
 
 ```
-1. iss == aud == cli（三者相等且非空） → SSO
-2. 有 "ctp" 字段 → XAT
-3. 有 "cli" 字段 → UAT（sub 加密）或 SAT（无 sub）
-4. 无 "cli"/"ctp" → CAT
+1. 有非空 "token_type" → 使用显式类型（SAT 为 "sat"）；未知类型拒绝
+2. iss == aud == cli（三者相等且非空） → SSO
+3. 有非空 "typ" → XAT
+4. 有 "cli" → UAT（sub 加密）
+5. 无 "cli"/"typ" → CAT
 ```
 
-> SSO 优先判断，因为 SSO 也携带 `cli` 字段，必须先排除。
+> 显式令牌种类优先于 SSO 的启发式判断。`token_type` 与 Challenge 的业务 `typ` 相互独立；签发方和消费方使用 Aegis Go SDK `v0.0.2`，并重新签发不带类型标识的旧 SAT。

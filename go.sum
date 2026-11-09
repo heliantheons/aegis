@@ -102,10 +102,16 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 h1:5VipnvEpbqr2gA2VbM+nYVbkIF2
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0/go.mod h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=
 github.com/heliantheon/aegis-go/guard v0.0.2-0.20260810161529-b6105ce3299f h1:CVfkYOFJN+KVZwySb0rIfy4Fcih8JFggD1vXj9OlPXk=
 github.com/heliantheon/aegis-go/guard v0.0.2-0.20260810161529-b6105ce3299f/go.mod h1:IQevG6vl2tMN1bRFzVLoslfptwUVf7/nlJtAeHT+jvg=
+github.com/heliantheon/aegis-go/guard v0.0.2 h1:WDDeiqeWew8Qx5N5plWPO93Y+H0sDB5Xc6Yqbv8Smhc=
+github.com/heliantheon/aegis-go/guard v0.0.2/go.mod h1:/0i0pZNN5ojAkdNFIJW9Hc3qpJl5Y4kU7wUrcIAhbDg=
 github.com/heliantheon/aegis-go/service v0.0.2-0.20260810161529-b6105ce3299f h1:UCJpQsEM/x7jLKAqC4E3/Cu02YoUXhf/vE6VFZ/Iq/E=
 github.com/heliantheon/aegis-go/service v0.0.2-0.20260810161529-b6105ce3299f/go.mod h1:suBj+2h0aXGHefPg7u6r+w1hfroL0+BLJ3v9FrXmGs8=
+github.com/heliantheon/aegis-go/service v0.0.2 h1:JJJmEruUaBCHy1GzoE/ZEKNPYRw2Wt70itjgYDJiFG8=
+github.com/heliantheon/aegis-go/service v0.0.2/go.mod h1:+laqUpG1ODLeqjb91DH/Y0SeOEv3Qg30bFda47mLeEA=
 github.com/heliantheon/aegis-go/utilities v0.0.2-0.20260810161529-b6105ce3299f h1:i9OSGIKrD0FUe2K56fTQYQ98xzUhzhe9M+f6Lp75svA=
 github.com/heliantheon/aegis-go/utilities v0.0.2-0.20260810161529-b6105ce3299f/go.mod h1:BNzqSbsD2qI8tMliDrPCHaNuGWUzkYqmgcEBR6oK6JA=
+github.com/heliantheon/aegis-go/utilities v0.0.2 h1:LDOt0HfZkeAr7oYTw5kC+5EknNu1c7W04Pe2PLdzLnQ=
+github.com/heliantheon/aegis-go/utilities v0.0.2/go.mod h1:BNzqSbsD2qI8tMliDrPCHaNuGWUzkYqmgcEBR6oK6JA=
 github.com/heliantheon/common v0.0.0-20260825100603-d0159ef384e7 h1:HCX5ChYcCYYwahgeX5+81cFZ9aegKNz9RFr420UFbrw=
 github.com/heliantheon/common v0.0.0-20260825100603-d0159ef384e7/go.mod h1:MdaHduwYvuhlfwFAhdrdKuxwPNU2Kcp+cj/YCqFiV2U=
 github.com/josharian/intern v1.0.0 h1:vlS4z54oSdjm0bgjRigI+G1HpF+tI+9rE5LLzOg8HmY=
