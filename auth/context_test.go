@@ -171,6 +171,13 @@ func TestValidateAuthorizeRequestUsesAudienceDataShape(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+			test.req.AuthorizeRequestBase = types.AuthorizeRequestBase{
+				ClientID:            "atlas",
+				RedirectURI:         "https://atlas.example.com/callback",
+				ResponseType:        "code",
+				CodeChallenge:       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				CodeChallengeMethod: "S256",
+			}
 			gotErr := validateAuthorizeRequest(&test.req)
 			if (gotErr != nil) != test.wantErr {
 				t.Fatalf("validateAuthorizeRequest() error = %v, wantErr %t", gotErr, test.wantErr)

@@ -34,11 +34,14 @@ const (
 // AuthFlow 认证流程上下文
 // auth session = flowID
 type AuthFlow struct {
-	ID           string    `json:"id"`
-	CreatedAt    time.Time `json:"created_at"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	MaxExpiresAt time.Time `json:"max_expires_at"` // 最大生命周期截止时间，超过后不可续期
-	State        FlowState `json:"state"`
+	ID               string    `json:"id"`
+	CreatedAt        time.Time `json:"created_at"`
+	ExpiresAt        time.Time `json:"expires_at"`
+	MaxExpiresAt     time.Time `json:"max_expires_at"` // 最大生命周期截止时间，超过后不可续期
+	State            FlowState `json:"state"`
+	AuthenticatedAt  time.Time `json:"authenticated_at"`
+	ConsentGranted   bool      `json:"consent_granted,omitempty"`
+	AuthorizationURL string    `json:"authorization_url,omitempty"`
 
 	// 请求参数
 	Request *AuthRequest `json:"request"`
@@ -95,6 +98,7 @@ type AuthorizeRequestBase struct {
 	Prompt    binding.SpaceDelimited `json:"prompt,omitempty" form:"prompt"`         // none, login, consent
 	Nonce     string                 `json:"nonce,omitempty" form:"nonce"`           // 防重放攻击
 	LoginHint string                 `json:"login_hint,omitempty" form:"login_hint"` // 登录提示（邮箱/手机）
+	MaxAge    *uint64                `json:"max_age,omitempty" form:"max_age"`
 }
 
 // AuthRequest 认证请求参数。具体流程由 audience/audiences 的实际数据形态决定。
@@ -128,6 +132,7 @@ var authRequestKnownFields = map[string]bool{
 	"prompt":     true,
 	"nonce":      true,
 	"login_hint": true,
+	"max_age":    true,
 	// 多 audience 扩展
 	"audiences": true,
 }
@@ -361,6 +366,9 @@ func (f *AuthFlow) GetIdentity(connection string) *models.UserIdentity {
 func (f *AuthFlow) SetAuthenticated(user *models.UserWithDecrypted) {
 	f.State = FlowStateAuthenticated
 	f.User = user
+	if f.AuthenticatedAt.IsZero() {
+		f.AuthenticatedAt = time.Now()
+	}
 }
 
 // AllRequiredVerified 检查当前 Connection 的所有 Require 依赖是否已验证

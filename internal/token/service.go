@@ -30,6 +30,10 @@ type Service struct {
 	domainDecryptors  map[string]*pkgtoken.Decryptor // audience → Decryptor (signKey=domain, encryptKey=service)
 	appDecryptor      *pkgtoken.Decryptor            // CT 专用（signKey=app, 只验签, encryptKey=nil）
 	mu                sync.RWMutex
+
+	oidcOnce   sync.Once
+	oidcSigner *idTokenSigner
+	oidcErr    error
 }
 
 func NewService(

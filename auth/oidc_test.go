@@ -1,0 +1,622 @@
+package auth
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc"
+
+	pkgtoken "github.com/heliantheon/aegis-go/utilities/token"
+	"github.com/heliantheon/aegis/config"
+	"github.com/heliantheon/aegis/internal/cache"
+	hermesv1 "github.com/heliantheon/aegis/internal/rpc/hermes/v1"
+	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/models"
+	"github.com/heliantheon/aegis/rpc/hermes"
+	pkgredis "github.com/heliantheon/common/redis"
+)
+
+func standardAuthorizationQuery() url.Values {
+	return url.Values{
+		"client_id":             {"atlas"},
+		"redirect_uri":          {"https://atlas.example/callback?tenant=one"},
+		"response_type":         {"code"},
+		"scope":                 {"openid profile email"},
+		"state":                 {"state + / ?"},
+		"nonce":                 {"nonce"},
+		"code_challenge":        {"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+		"code_challenge_method": {"S256"},
+	}
+}
+
+func authorizeQueryContext(query url.Values) *gin.Context {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/authorize?"+query.Encode(), nil)
+	return c
+}
+
+func TestBindAuthorizeQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name    string
+		change  func(url.Values)
+		wantErr bool
+	}{
+		{name: "standard request with optional resource"},
+		{name: "multi audience extension", change: func(q url.Values) {
+			q.Set("audiences", `{"iris":{"scope":"openid profile"},"hermes":{"scope":"read"}}`)
+		}},
+		{name: "explicit zero max age", change: func(q url.Values) { q.Set("max_age", "0") }},
+		{name: "repeated state", change: func(q url.Values) { q.Add("state", "attacker") }, wantErr: true},
+		{name: "repeated redirect", change: func(q url.Values) { q.Add("redirect_uri", "https://evil.example") }, wantErr: true},
+		{name: "negative max age", change: func(q url.Values) { q.Set("max_age", "-1") }, wantErr: true},
+		{name: "fractional max age", change: func(q url.Values) { q.Set("max_age", "0.1") }, wantErr: true},
+		{name: "empty max age", change: func(q url.Values) { q.Set("max_age", "") }, wantErr: true},
+		{name: "invalid audience object", change: func(q url.Values) { q.Set("audiences", `[]`) }, wantErr: true},
+		{name: "fragment response mode", change: func(q url.Values) { q.Set("response_mode", "fragment") }, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			q := standardAuthorizationQuery()
+			if tt.change != nil {
+				tt.change(q)
+			}
+			var req types.AuthRequest
+			_, err := bindAuthorizeQuery(authorizeQueryContext(q), &req)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("bindAuthorizeQuery() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if req.ClientID != "atlas" || req.State != q.Get("state") || !req.Scope.Contains("openid") || req.Nonce != "nonce" {
+				t.Fatalf("bound standard request = %+v", req)
+			}
+			if q.Has("max_age") && (req.MaxAge == nil || *req.MaxAge != 0) {
+				t.Fatalf("max_age = %v, want explicit zero", req.MaxAge)
+			}
+			if q.Has("audiences") && req.Audiences["iris"].Scope != "openid profile" {
+				t.Fatalf("audiences = %+v", req.Audiences)
+			}
+		})
+	}
+}
+
+func TestAuthorizationDecodersIsolateRestartURLAndIgnoreMethod(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	query := standardAuthorizationQuery()
+	query.Set("audience", "iris")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequestWithContext(context.Background(), method, "/api/authorize?"+query.Encode(), strings.NewReader("invalid body"))
+		var req types.AuthRequest
+		restartURL, err := bindAuthorizeQuery(c, &req)
+		if err != nil || restartURL != "/api/authorize?"+query.Encode() || req.ClientID != "atlas" {
+			t.Fatalf("%s query decoder = %+v, restart = %q, error = %v", method, req, restartURL, err)
+		}
+		encoded, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, body := range []struct {
+			contentType string
+			value       string
+		}{{gin.MIMEJSON, string(encoded)}, {gin.MIMEPOSTForm, query.Encode()}} {
+			c.Request = httptest.NewRequestWithContext(context.Background(), method, "/api/authorize?client_id=attacker&redirect_uri=https://evil.example", strings.NewReader(body.value))
+			c.Request.Header.Set("Content-Type", body.contentType)
+			var bound types.AuthRequest
+			err = bindAuthorizeBody(c, &bound)
+			if err != nil || bound.ClientID != "atlas" || bound.Audience != "iris" || bound.State != req.State || !bound.Scope.Contains("openid") {
+				t.Fatalf("%s %s body decoder = %+v, error = %v", method, body.contentType, bound, err)
+			}
+		}
+	}
+}
+
+func TestValidateStandardAuthorizationParameters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name    string
+		change  func(*types.AuthRequest)
+		wantErr bool
+	}{
+		{name: "code with S256"},
+		{name: "login and consent", change: func(r *types.AuthRequest) { r.Prompt = []string{"login", "consent"} }},
+		{name: "silent only", change: func(r *types.AuthRequest) { r.Prompt = []string{"none"} }},
+		{name: "hybrid response", change: func(r *types.AuthRequest) { r.ResponseType = "code id_token" }, wantErr: true},
+		{name: "implicit response", change: func(r *types.AuthRequest) { r.ResponseType = "token" }, wantErr: true},
+		{name: "empty response", change: func(r *types.AuthRequest) { r.ResponseType = "" }, wantErr: true},
+		{name: "plain challenge", change: func(r *types.AuthRequest) { r.CodeChallengeMethod = "plain" }, wantErr: true},
+		{name: "short challenge", change: func(r *types.AuthRequest) { r.CodeChallenge = "abc" }, wantErr: true},
+		{name: "none and login", change: func(r *types.AuthRequest) { r.Prompt = []string{"none", "login"} }, wantErr: true},
+		{name: "none and consent", change: func(r *types.AuthRequest) { r.Prompt = []string{"none", "consent"} }, wantErr: true},
+		{name: "unknown prompt", change: func(r *types.AuthRequest) { r.Prompt = []string{"select_account"} }, wantErr: true},
+		{name: "duplicate prompt", change: func(r *types.AuthRequest) { r.Prompt = []string{"login", "login"} }, wantErr: true},
+		{name: "null audience", change: func(r *types.AuthRequest) {
+			r.Audience = ""
+			r.Audiences = map[string]*types.RequestAudienceScope{"iris": nil}
+		}, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var req types.AuthRequest
+			if _, err := bindAuthorizeQuery(authorizeQueryContext(standardAuthorizationQuery()), &req); err != nil {
+				t.Fatal(err)
+			}
+			req.Audience = "iris"
+			if tt.change != nil {
+				tt.change(&req)
+			}
+			if err := validateAuthorizeRequest(&req); (err != nil) != tt.wantErr {
+				t.Fatalf("validateAuthorizeRequest() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestAuthorizationRedirectMustMatchRegistrationExactly(t *testing.T) {
+	t.Parallel()
+	registered := `["https://client.example/callback?tenant=one"]`
+	app := &models.Application{AllowedRedirectURIs: &registered}
+	for _, tt := range []struct {
+		uri  string
+		want bool
+	}{
+		{"https://client.example/callback?tenant=one", true},
+		{"https://client.example/callback/?tenant=one", false},
+		{"https://CLIENT.example/callback?tenant=one", false},
+		{"https://client.example/callback?tenant=one#fragment", false},
+		{"https://client.example/callback?tenant=two", false},
+		{"https://client.example.evil/callback?tenant=one", false},
+	} {
+		if got := validAuthorizationRedirect(app, tt.uri); got != tt.want {
+			t.Errorf("validAuthorizationRedirect(%q) = %v, want %v", tt.uri, got, tt.want)
+		}
+	}
+}
+
+type authorizationRegistry struct {
+	grpc.ClientConnInterface
+	lookups int
+	reject  bool
+}
+
+func (r *authorizationRegistry) Invoke(_ context.Context, method string, _ any, reply any, _ ...grpc.CallOption) error {
+	switch method {
+	case hermesv1.ProvisionService_GetApplication_FullMethodName:
+		r.lookups++
+		if r.reject {
+			return errors.New("application not registered")
+		}
+		application, ok := reply.(*hermesv1.Application)
+		if !ok {
+			return errors.New("unexpected application response type")
+		}
+		application.AppId = "atlas"
+		application.AllowedRedirectUris = []string{standardAuthorizationQuery().Get("redirect_uri")}
+		return nil
+	case hermesv1.KeyService_GetKeys_FullMethodName:
+		return nil
+	default:
+		return errors.New("unexpected authorization registry request: " + method)
+	}
+}
+
+func authorizationHandler(t *testing.T, registry *authorizationRegistry) *Handler {
+	t.Helper()
+	manager := cache.NewManager(hermes.New(registry), nil)
+	t.Cleanup(manager.Close)
+	return &Handler{cache: manager}
+}
+
+func TestAuthorizationAdaptersComposeIndependentlyOfMethod(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := authorizationHandler(t, &authorizationRegistry{})
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		for _, parameters := range []AuthorizationParameters{QueryParameters, BodyParameters} {
+			for _, response := range []AuthorizationResponse{BrowserResponse, ActionResponse} {
+				query := standardAuthorizationQuery()
+				query.Set("response_type", "token")
+				body := `{"ignored":`
+				if parameters == BodyParameters {
+					var req types.AuthRequest
+					if _, err := bindAuthorizeQuery(authorizeQueryContext(query), &req); err != nil {
+						t.Fatal(err)
+					}
+					encoded, err := json.Marshal(req)
+					if err != nil {
+						t.Fatal(err)
+					}
+					body = string(encoded)
+					query.Set("redirect_uri", "https://evil.example/callback")
+				}
+				request := httptest.NewRequestWithContext(context.Background(), method, "/api/authorize?"+query.Encode(), strings.NewReader(body))
+				request.Header.Set("Content-Type", gin.MIMEJSON)
+				recorder := httptest.NewRecorder()
+				router := gin.New()
+				router.Handle(method, "/api/authorize", h.Authorize(parameters, response))
+				router.ServeHTTP(recorder, request)
+				if response == ActionResponse {
+					if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || !strings.Contains(recorder.Body.String(), `"unsupported_response_type"`) {
+						t.Fatalf("method=%s parameters=%d action response = %d %q %s", method, parameters, recorder.Code, recorder.Header().Get("Location"), recorder.Body.String())
+					}
+					continue
+				}
+				u, err := url.Parse(recorder.Header().Get("Location"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if recorder.Code != http.StatusSeeOther || u.Host != "atlas.example" || u.Query().Get("tenant") != "one" || u.Query().Get("state") != query.Get("state") || u.Query().Get("error") != "unsupported_response_type" {
+					t.Fatalf("method=%s parameters=%d browser response = %d %s", method, parameters, recorder.Code, u)
+				}
+			}
+		}
+	}
+}
+
+func TestAuthorizationQueryErrorsValidateRegistryBeforeRedirect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name      string
+		change    func(url.Values)
+		reject    bool
+		malformed bool
+		redirect  bool
+		lookup    bool
+	}{
+		{name: "registered redirect", redirect: true, lookup: true},
+		{name: "unregistered redirect", change: func(q url.Values) { q.Set("redirect_uri", "https://evil.example/callback") }, lookup: true},
+		{name: "unknown client", reject: true, lookup: true},
+		{name: "duplicate client", change: func(q url.Values) { q.Add("client_id", "other") }},
+		{name: "duplicate redirect", change: func(q url.Values) { q.Add("redirect_uri", "https://evil.example/callback") }},
+		{name: "malformed query", malformed: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &authorizationRegistry{reject: tt.reject}
+			h := authorizationHandler(t, registry)
+			query := standardAuthorizationQuery()
+			query.Add("state", "duplicate")
+			if tt.change != nil {
+				tt.change(query)
+			}
+			rawQuery := query.Encode()
+			if tt.malformed {
+				rawQuery += "&invalid=%zz"
+			}
+			recorder := httptest.NewRecorder()
+			router := gin.New()
+			router.POST("/api/authorize", h.Authorize(QueryParameters, BrowserResponse))
+			router.ServeHTTP(recorder, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/authorize?"+rawQuery, nil))
+			if (registry.lookups > 0) != tt.lookup {
+				t.Fatalf("registry lookups = %d, want lookup %v", registry.lookups, tt.lookup)
+			}
+			if !tt.redirect {
+				if recorder.Code < 400 || recorder.Header().Get("Location") != "" {
+					t.Fatalf("unvalidated error = %d %q", recorder.Code, recorder.Header().Get("Location"))
+				}
+				return
+			}
+			u, err := url.Parse(recorder.Header().Get("Location"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusSeeOther || u.Host != "atlas.example" || u.Query().Get("error") != "invalid_request" {
+				t.Fatalf("validated error = %d %s", recorder.Code, u)
+			}
+		})
+	}
+}
+
+func TestAuthorizationBodyBindingErrorsRejectUnregisteredRedirects(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		for _, tt := range []struct {
+			contentType string
+			body        string
+			lookups     int
+		}{
+			{gin.MIMEJSON, `{"client_id":"atlas","redirect_uri":"https://evil.example/callback","response_type":`, 0},
+			{gin.MIMEPOSTForm, "client_id=atlas&redirect_uri=https%3A%2F%2Fevil.example%2Fcallback&max_age=-1", 1},
+		} {
+			registry := &authorizationRegistry{}
+			h := authorizationHandler(t, registry)
+			request := httptest.NewRequestWithContext(context.Background(), method, "/api/authorize?"+standardAuthorizationQuery().Encode(), strings.NewReader(tt.body))
+			request.Header.Set("Content-Type", tt.contentType)
+			recorder := httptest.NewRecorder()
+			router := gin.New()
+			router.Handle(method, "/api/authorize", h.Authorize(BodyParameters, BrowserResponse))
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || registry.lookups != tt.lookups {
+				t.Fatalf("%s %s body error = %d %q, registry lookups = %d, want %d", method, tt.contentType, recorder.Code, recorder.Header().Get("Location"), registry.lookups, tt.lookups)
+			}
+		}
+	}
+}
+
+func TestAuthorizationBindingErrorsUseSelectedResponder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		for _, parameters := range []AuthorizationParameters{QueryParameters, BodyParameters} {
+			for _, response := range []AuthorizationResponse{BrowserResponse, ActionResponse} {
+				registry := &authorizationRegistry{}
+				h := authorizationHandler(t, registry)
+				query := standardAuthorizationQuery()
+				query.Set("max_age", "invalid")
+				target := "/api/authorize?" + query.Encode()
+				body := "ignored body"
+				if parameters == BodyParameters {
+					target = "/api/authorize?client_id=attacker&redirect_uri=https://evil.example"
+					body = query.Encode()
+				}
+				request := httptest.NewRequestWithContext(context.Background(), method, target, strings.NewReader(body))
+				request.Header.Set("Content-Type", gin.MIMEPOSTForm)
+				recorder := httptest.NewRecorder()
+				router := gin.New()
+				router.Handle(method, "/api/authorize", h.Authorize(parameters, response))
+				router.ServeHTTP(recorder, request)
+				if response == ActionResponse {
+					if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || registry.lookups != 0 {
+						t.Fatalf("%s parameters=%d action binding error = %d %q, registry lookups = %d", method, parameters, recorder.Code, recorder.Header().Get("Location"), registry.lookups)
+					}
+					continue
+				}
+				u, err := url.Parse(recorder.Header().Get("Location"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if recorder.Code != http.StatusSeeOther || registry.lookups != 1 || u.Host != "atlas.example" || u.Query().Get("error") != "invalid_request" || u.Query().Get("state") != query.Get("state") {
+					t.Fatalf("%s parameters=%d browser binding error = %d %s, registry lookups = %d", method, parameters, recorder.Code, u, registry.lookups)
+				}
+			}
+		}
+	}
+}
+
+func TestAuthorizationNavigationUsesExplicitResponder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		for _, tt := range []struct {
+			navigate func(*gin.Context, string)
+			status   int
+		}{{browserRedirect, http.StatusSeeOther}, {actionRedirect, http.StatusMultipleChoices}} {
+			recorder := httptest.NewRecorder()
+			router := gin.New()
+			router.Handle(method, "/api/authorize", func(c *gin.Context) {
+				forwardNext(c, &types.AuthFlow{State: types.FlowStateInitialized}, tt.navigate)
+			})
+			router.ServeHTTP(recorder, httptest.NewRequestWithContext(context.Background(), method, "/api/authorize", nil))
+			if recorder.Code != tt.status || recorder.Header().Get("Location") != config.GetEndpointLogin() {
+				t.Fatalf("%s navigation = %d %q", method, recorder.Code, recorder.Header().Get("Location"))
+			}
+		}
+	}
+}
+
+func TestSSOAuthenticationAge(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(1700000100, 0)
+	zero, ten := uint64(0), uint64(10)
+	for _, tt := range []struct {
+		name            string
+		authenticatedAt time.Time
+		maxAge          *uint64
+		want            bool
+	}{
+		{"unknown timestamp", time.Time{}, nil, false},
+		{"legacy session with max age", time.Time{}, &ten, false},
+		{"fresh session", now.Add(-time.Second), &ten, true},
+		{"exact age", now.Add(-10 * time.Second), &ten, true},
+		{"expired authentication", now.Add(-11 * time.Second), &ten, false},
+		{"zero always reauthenticates", now, &zero, false},
+		{"future authentication", now.Add(time.Second), nil, false},
+		{"no maximum age", now.Add(-time.Hour), nil, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ssoAuthenticationFresh(tt.authenticatedAt, tt.maxAge, now); got != tt.want {
+				t.Fatalf("ssoAuthenticationFresh() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func buildUserInfoToken(t *testing.T, issuer, audience, scope, openID string, lifetime time.Duration) *pkgtoken.UserAccessToken {
+	t.Helper()
+	built := pkgtoken.NewClaimsBuilder().Issuer(issuer).ClientID("atlas").Audience(audience).ExpiresIn(lifetime).
+		Build(pkgtoken.NewUserAccessTokenBuilder().OpenID(openID).Nickname("Alice").Picture("https://assets.example/alice.png").Email("alice@example.com").Phone("+123456789").Scope(scope))
+	uat, ok := built.(*pkgtoken.UserAccessToken)
+	if !ok {
+		t.Fatalf("built token = %T", built)
+	}
+	pasetoToken, err := pkgtoken.Build(uat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uat.Claims, err = pkgtoken.ParseClaims(pasetoToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uat
+}
+
+func TestUserInfoTokenBoundaries(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, issuer, audience, openID string
+		lifetime                       time.Duration
+		want                           bool
+	}{
+		{"valid UAT", "https://aegis.example/api", "iris", "user", time.Hour, true},
+		{"wrong issuer", "https://evil.example/api", "iris", "user", time.Hour, false},
+		{"wrong audience", "https://aegis.example/api", "hermes", "user", time.Hour, false},
+		{"missing subject", "https://aegis.example/api", "iris", "", time.Hour, false},
+		{"expired UAT", "https://aegis.example/api", "iris", "user", -time.Second, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			uat := buildUserInfoToken(t, tt.issuer, tt.audience, "openid", tt.openID, tt.lifetime)
+			if got := userInfoToken(uat, "https://aegis.example/api", "iris"); (got != nil) != tt.want {
+				t.Fatalf("userInfoToken() accepted = %v, want %v", got != nil, tt.want)
+			}
+		})
+	}
+	sat := pkgtoken.NewClaimsBuilder().Issuer("https://aegis.example/api").Audience("iris").Build(pkgtoken.NewServiceAccessTokenBuilder())
+	if userInfoToken(sat, "https://aegis.example/api", "iris") != nil {
+		t.Fatal("UserInfo accepted SAT")
+	}
+}
+
+func TestUserInfoFiltersStandardClaimsByScopes(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		scope string
+		keys  []string
+		want  bool
+	}{
+		{"profile email phone", nil, false},
+		{"openid", []string{"sub"}, true},
+		{"openid profile", []string{"sub", "nickname", "picture"}, true},
+		{"openid email", []string{"sub", "email"}, true},
+		{"openid phone", []string{"sub", "phone_number"}, true},
+		{"openid profile email phone", []string{"sub", "nickname", "picture", "email", "phone_number"}, true},
+	} {
+		t.Run(tt.scope, func(t *testing.T) {
+			uat := buildUserInfoToken(t, "https://aegis.example/api", "iris", tt.scope, "user", time.Hour)
+			claims, ok := userInfoClaims(uat)
+			if ok != tt.want || len(claims) != len(tt.keys) {
+				t.Fatalf("userInfoClaims() = %v, %v", claims, ok)
+			}
+			for _, key := range tt.keys {
+				if _, exists := claims[key]; !exists {
+					t.Fatalf("missing %s in %v", key, claims)
+				}
+			}
+		})
+	}
+}
+
+func TestDiscoveryMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/discovery", (&Handler{}).Discovery)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/discovery", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("discovery status = %d", recorder.Code)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	issuer := config.GetIssuer()
+	if metadata["issuer"] != issuer || metadata["authorization_endpoint"] != issuer+"/authorize" || metadata["jwks_uri"] != issuer+"/jwks" {
+		t.Fatalf("discovery metadata = %v", metadata)
+	}
+}
+
+type ssoAuthTimeRedis struct {
+	pkgredis.Client
+	hashes map[string]map[string]string
+	ttls   map[string]time.Duration
+}
+
+func (r *ssoAuthTimeRedis) HGetAll(_ context.Context, key string) (map[string]string, error) {
+	result := make(map[string]string)
+	for domain, value := range r.hashes[key] {
+		result[domain] = value
+	}
+	return result, nil
+}
+
+func (r *ssoAuthTimeRedis) HSet(_ context.Context, key string, values ...any) error {
+	fields, ok := values[0].(map[string]string)
+	if !ok {
+		return errors.New("unexpected SSO metadata value")
+	}
+	r.hashes[key] = fields
+	return nil
+}
+
+func (r *ssoAuthTimeRedis) Expire(_ context.Context, key string, ttl time.Duration) error {
+	r.ttls[key] = ttl
+	return nil
+}
+
+func TestSSORenewalPreservesOriginalDomainAuthenticationTimes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	original := map[string]string{"platform": "1700000000", "consumer": "1700000010"}
+	redis := &ssoAuthTimeRedis{hashes: map[string]map[string]string{ssoAuthTimeKey("old"): original}, ttls: make(map[string]time.Duration)}
+	manager := cache.NewManager(nil, redis)
+	defer manager.Close()
+	h := &Handler{cache: manager}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/authorize", nil)
+	c.Request.AddCookie(&http.Cookie{Name: config.GetSSOCookieName(), Value: "old", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	h.copySSOAuthTimes(c, context.Background(), "renewed", "", time.Time{})
+	if got := redis.hashes[ssoAuthTimeKey("renewed")]; !reflect.DeepEqual(got, original) {
+		t.Fatalf("renewal auth times = %v, want %v", got, original)
+	}
+	if redis.ttls[ssoAuthTimeKey("renewed")] != config.GetSSOTTL() {
+		t.Fatal("renewal metadata TTL does not follow the SSO lifetime")
+	}
+	h.copySSOAuthTimes(c, context.Background(), "reauthenticated", "platform", time.Unix(1700000099, 0))
+	want := map[string]string{"platform": "1700000099", "consumer": "1700000010"}
+	if got := redis.hashes[ssoAuthTimeKey("reauthenticated")]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reauthentication auth times = %v, want %v", got, want)
+	}
+}
+
+func TestConsentRequiresExplicitDecision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/consent", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", gin.MIMEJSON)
+	router := gin.New()
+	router.POST("/api/consent", (&Handler{}).Consent)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("consent without decision status = %d", recorder.Code)
+	}
+}
+
+func TestOIDCConsentPolicyRequiresExplicitApproval(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		request types.AuthRequest
+		granted bool
+		want    bool
+	}{
+		{name: "existing OAuth resource", request: types.AuthRequest{Audience: "iris"}},
+		{name: "OIDC login", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Scope: []string{"openid", "profile"}}}, want: true},
+		{name: "offline access", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Scope: []string{"openid", "offline_access"}}}, want: true},
+		{name: "silent offline access", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Scope: []string{"openid", "offline_access"}, Prompt: []string{"none"}}}, want: true},
+		{name: "multi audience OIDC", request: types.AuthRequest{Audiences: map[string]*types.RequestAudienceScope{"iris": {Scope: "openid offline_access"}}}, want: true},
+		{name: "explicit prompt", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Prompt: []string{"consent"}}}, want: true},
+		{name: "approved flow", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Scope: []string{"openid", "offline_access"}}}, granted: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := &types.AuthFlow{Request: &tt.request, ConsentGranted: tt.granted}
+			if got := requiresConsent(flow); got != tt.want {
+				t.Fatalf("requiresConsent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAuthorizationCodeRedirectPreservesRegisteredQueryAndState(t *testing.T) {
+	t.Parallel()
+	location := buildAuthCodeRedirectURL("https://client.example/callback?tenant=one", &cache.AuthorizationCode{Code: "code + / ?", State: "state + / ?"})
+	u, err := url.Parse(location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Query().Get("tenant") != "one" || u.Query().Get("code") != "code + / ?" || u.Query().Get("state") != "state + / ?" {
+		t.Fatalf("callback query = %v", u.Query())
+	}
+}
