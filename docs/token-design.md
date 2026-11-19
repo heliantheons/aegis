@@ -420,8 +420,8 @@ d. 匹配成功 → ParseV4Public 验签
 
 跨域、缓存和导航隐私按行为组合，复用独立中间件；现有 PASETO 凭证格式保持不变。
 
-- 浏览器来源分为三个独立策略：应用 `allowed_origins` 仅控制 token、revoke 及后续 UserInfo 等客户端协议操作，不授予登录或账户管理访问权。登录 UI 使用 `cors.login-origins`，账户管理 UI 使用 `cors.management-origins`；两者始终包含 Aegis endpoint，各自额外列表只扩展本组，允许空列表。示例登录 UI 为 Aegis，账户 UI 为 Iris（Pallas）。环境覆盖名为 `AEGIS_CORS_LOGIN_ORIGINS` 和 `AEGIS_CORS_MANAGEMENT_ORIGINS`，列表使用空格分隔。可信 UI origin 必须是无路径、查询、用户信息的完整 HTTP(S) origin，不允许 `*` 或 `null`。
-- `middleware.CORS` 用于静态 UI 和公开资源；不可信实际 Origin 在业务处理前返回 403。登录会话创建使用私有 `POST /api/auth/sessions`，不再提供 `POST /api/authorize` 别名。标准 `/authorize` 导航端点不开放 CORS。现有 context、connections、idps、login、binding、challenge、logout 路径归属登录组；profile、identities、mfa 路径仅使用管理组 CORS、现有 Iris Bearer guard 和 NoStore，不使用 Cookie 来源保护，也不新增权限模型。
+- 服务仅提供一份 `cors.origins`，用于显式信任可调用登录会话、context、connections、idps、login、binding、challenge、logout 等接口的前端；Aegis endpoint 始终包含在可信来源中，额外列表可为空。环境覆盖名为 `AEGIS_CORS_ORIGINS`，列表使用空格分隔。可信 origin 必须是无路径、查询、用户信息的完整 HTTP(S) origin，不允许 `*` 或 `null`。应用 `allowed_origins` 独立控制 token、revoke 及后续 UserInfo 等客户端协议操作，不授予登录 API 访问权。
+- profile、identities、mfa 等账号业务接口不挂载 CORS，也不提供跨域预检；前端通过业务服务自己的同源地址访问，例如 Iris 的相对路径 `/api`。接口保留现有 Iris Bearer guard、用户归属校验与 NoStore；服务端调用仍按业务凭证和权限处理，不新增来源白名单。私有登录会话创建使用 `POST /api/auth/sessions`；标准 `/authorize` 导航端点不开放 CORS。
 - `middleware.Preflight` 只处理同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的完整预检，普通 OPTIONS 和实际请求不设置 CORS 响应头。token/revoke 的通用 POST 预检允许 `*` 且不开放凭证；实际请求在验证客户端后才调用 `AllowOrigin` 检查应用策略，拒绝来源返回 403，未知客户端或请求体错误不继承通用 `*`。跨域中间件不解析请求体、`client_id` 或应用缓存；失败响应也按 Origin 变化。允许响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
 - 元数据和公钥是公开信息；`/api/pubkeys` 保留任意来源读取及公共缓存，不开放跨域凭证。`middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和 `Pragma: no-cache`，覆盖认证会话、账户管理、token、撤销和 Bearer 权限检查的成功、错误及跳转响应。`middleware.NoReferrer` 用于私有会话创建及上游身份提供方回调。
 - `middleware.ProtectCookieRequests` 保护登录组 Cookie 状态变更接口。明确受信任 Origin 即使携带 `Sec-Fetch-Site: cross-site` 也允许；不可信 Origin 即使标为 same-site/same-origin 也拒绝。Origin 缺省时保留同源 Fetch Metadata 或可信 Referer 回退；缺少来源依据返回 403。GET、HEAD 和 OPTIONS 沿用路由行为。token 交换、显式 token 撤销和 Bearer 管理接口不挂载此防护；上游回调继续使用现有交易校验。

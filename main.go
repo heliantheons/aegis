@@ -86,7 +86,7 @@ func main() {
 	})
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	loginOrigins := aegisconfig.GetLoginOrigins()
+	loginOrigins := aegisconfig.GetCORSOrigins()
 	aegisCORS := middleware.CORS(middleware.CORSOptions{
 		ResolveOrigin:    middleware.AllowedOrigins(loginOrigins),
 		AllowCredentials: true,
@@ -96,11 +96,7 @@ func main() {
 	api := r.Group("/api")
 	registerAuthRoutes(api, aegisHandler, aegisCORS, cookieProtection)
 
-	managementCORS := middleware.CORS(middleware.CORSOptions{
-		ResolveOrigin:    middleware.AllowedOrigins(aegisconfig.GetManagementOrigins()),
-		AllowCredentials: true,
-	})
-	if err := registerAccountRoutes(api, aegisHandler, managementCORS, aegisconfig.GetIrisAudience()); err != nil {
+	if err := registerAccountRoutes(api, aegisHandler, aegisconfig.GetIrisAudience()); err != nil {
 		logger.Fatalf("初始化 Iris 鉴权中间件失败: %v", err)
 	}
 
@@ -179,12 +175,13 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, aegisC
 	api.POST("/check", middleware.NoStore, aegisHandler.Check)
 }
 
-func registerAccountRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, managementCORS gin.HandlerFunc, audience string) error {
+func registerAccountRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, audience string) error {
 	irisGuard, err := guard.NewGin(audience)
 	if err != nil {
 		return err
 	}
 	profile := aegisHandler.Profile()
+	accounts := api.Group("", middleware.NoStore, irisGuard.Require())
 	userRoutes := []struct {
 		method, path string
 		handler      gin.HandlerFunc
@@ -200,13 +197,8 @@ func registerAccountRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, man
 		{"PATCH", "/mfa", profile.UpdateMFA},
 		{"DELETE", "/mfa", profile.DeleteMFA},
 	}
-	registered := make(map[string]bool)
 	for _, route := range userRoutes {
-		api.Handle(route.method, route.path, managementCORS, middleware.NoStore, irisGuard.Require(), route.handler)
-		if !registered[route.path] {
-			api.OPTIONS(route.path, managementCORS)
-			registered[route.path] = true
-		}
+		accounts.Handle(route.method, route.path, route.handler)
 	}
 	return nil
 }

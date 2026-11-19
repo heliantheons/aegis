@@ -169,52 +169,54 @@ func TestPublicOAuthRoutesDoNotRequireCookieSourceEvidence(t *testing.T) {
 	}
 }
 
-func TestBrowserPolicyGroupsStayIndependent(t *testing.T) {
-	const login, manager, protocol = "https://login.example", "https://atlas.example", "https://app.example"
+func TestLoginCORSDoesNotExposeAccountRoutes(t *testing.T) {
+	const login, service, protocol = "https://login.example", "https://iris.example", "https://app.example"
 	if err := configureProfileTokenManager("https://aegis.example/api", "iris", bytes.Repeat([]byte{1}, 48)); err != nil {
 		t.Fatal(err)
 	}
-	uiCORS := func(origin string) gin.HandlerFunc {
-		return middleware.CORS(middleware.CORSOptions{ResolveOrigin: middleware.AllowedOrigins([]string{origin}), AllowCredentials: true})
-	}
+	loginCORS := middleware.CORS(middleware.CORSOptions{ResolveOrigin: middleware.AllowedOrigins([]string{login}), AllowCredentials: true})
 	handler := auth.NewHandler(nil, nil, nil, nil, nil, nil, &profile.Handler{}, nil)
 	router := gin.New()
-	registerAuthRoutes(router.Group("/api"), handler, uiCORS(login), middleware.ProtectCookieRequests([]string{login}))
-	if err := registerAccountRoutes(router.Group("/api"), handler, uiCORS(manager), "iris"); err != nil {
+	registerAuthRoutes(router.Group("/api"), handler, loginCORS, middleware.ProtectCookieRequests([]string{login}))
+	if err := registerAccountRoutes(router.Group("/api"), handler, "iris"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tt := range []struct {
 		method, path, origin string
 		status               int
+		allowOrigin          string
 	}{
-		{"POST", "/api/auth/sessions", login, http.StatusBadRequest},
-		{"POST", "/api/auth/sessions", manager, http.StatusForbidden},
-		{"POST", "/api/auth/sessions", protocol, http.StatusForbidden},
-		{"POST", "/api/authorize", login, http.StatusNotFound},
-		{"GET", "/api/profile", manager, http.StatusUnauthorized},
-		{"PATCH", "/api/profile", manager, http.StatusUnauthorized},
-		{"GET", "/api/identities", manager, http.StatusUnauthorized},
-		{"GET", "/api/mfa", manager, http.StatusUnauthorized},
-		{"GET", "/api/profile", login, http.StatusForbidden},
-		{"GET", "/api/identities", protocol, http.StatusForbidden},
-		{"POST", "/api/mfa", login, http.StatusForbidden},
-		{"POST", "/api/mfa", protocol, http.StatusForbidden},
+		{"POST", "/api/auth/sessions", login, http.StatusBadRequest, login},
+		{"POST", "/api/auth/sessions", service, http.StatusForbidden, ""},
+		{"POST", "/api/auth/sessions", protocol, http.StatusForbidden, ""},
+		{"POST", "/api/authorize", login, http.StatusNotFound, ""},
+		{"GET", "/api/profile", service, http.StatusUnauthorized, ""},
+		{"PATCH", "/api/profile", service, http.StatusUnauthorized, ""},
+		{"GET", "/api/identities", service, http.StatusUnauthorized, ""},
+		{"GET", "/api/mfa", service, http.StatusUnauthorized, ""},
+		{"GET", "/api/profile", login, http.StatusUnauthorized, ""},
+		{"GET", "/api/identities", protocol, http.StatusUnauthorized, ""},
+		{"POST", "/api/mfa", login, http.StatusUnauthorized, ""},
+		{"POST", "/api/mfa", protocol, http.StatusUnauthorized, ""},
+		{"GET", "/api/mfa", "", http.StatusUnauthorized, ""},
+		{"OPTIONS", "/api/profile", login, http.StatusNotFound, ""},
+		{"OPTIONS", "/api/mfa", protocol, http.StatusNotFound, ""},
 	} {
 		t.Run(tt.method+tt.path+tt.origin, func(t *testing.T) {
-			request := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, strings.NewReader("{"))
+			request := httptest.NewRequestWithContext(t.Context(), tt.method, service+tt.path, strings.NewReader("{"))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Origin", tt.origin)
 			request.Header.Set("Sec-Fetch-Site", "cross-site")
+			if tt.method == http.MethodOptions {
+				request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			}
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, request)
-			if response.Code != tt.status {
-				t.Fatalf("status = %d, want %d: %s", response.Code, tt.status, response.Body.String())
+			if response.Code != tt.status || response.Header().Get("Access-Control-Allow-Origin") != tt.allowOrigin {
+				t.Fatalf("status = %d, headers %v; want status %d, origin %q", response.Code, response.Header(), tt.status, tt.allowOrigin)
 			}
-			if tt.status == http.StatusForbidden && response.Header().Get("Access-Control-Allow-Origin") != "" {
-				t.Fatalf("foreign UI origin allowed: %v", response.Header())
-			}
-			if tt.status == http.StatusUnauthorized && (response.Header().Get("Access-Control-Allow-Origin") != manager || response.Header().Get("Cache-Control") != "no-store") {
-				t.Fatalf("management response policy = %v", response.Header())
+			if tt.status == http.StatusUnauthorized && (response.Header().Get("Access-Control-Allow-Credentials") != "" || response.Header().Get("Cache-Control") != "no-store") {
+				t.Fatalf("account response policy = %v", response.Header())
 			}
 		})
 	}

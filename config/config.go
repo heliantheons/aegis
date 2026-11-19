@@ -95,18 +95,9 @@ func GetIssuer() string {
 	return GetEndpoint() + "/api"
 }
 
-// GetLoginOrigins returns the primary Aegis UI plus explicitly trusted login UIs.
-func GetLoginOrigins() []string {
-	return uiOrigins("cors.login-origins")
-}
-
-// GetManagementOrigins returns the primary Aegis UI plus trusted account UIs.
-func GetManagementOrigins() []string {
-	return uiOrigins("cors.management-origins")
-}
-
-func uiOrigins(key string) []string {
-	extras := Cfg().GetStringSlice(key)
+// GetCORSOrigins 返回服务自身及显式允许的登录前端来源。
+func GetCORSOrigins() []string {
+	extras := Cfg().GetStringSlice("cors.origins")
 	origins := make([]string, 1, len(extras)+1)
 	origins[0] = GetEndpoint()
 	return append(origins, extras...)
@@ -114,7 +105,7 @@ func uiOrigins(key string) []string {
 
 func validateHTTPOrigins() error {
 	var errs []error
-	for _, key := range []string{"aegis.endpoint", "cors.login-origins", "cors.management-origins"} {
+	for _, key := range []string{"aegis.endpoint", "cors.origins"} {
 		origins := Cfg().GetStringSlice(key)
 		if key == "aegis.endpoint" {
 			origins = []string{GetEndpoint()}

@@ -41,43 +41,40 @@ func setHTTPTestConfig(t *testing.T, key string, value any) {
 	t.Cleanup(func() { Cfg().Set(key, previous) })
 }
 
-func TestUIOriginsAlwaysIncludeEndpointAndStayIndependent(t *testing.T) {
+func TestCORSOriginsIncludeServiceAndConfiguredFrontends(t *testing.T) {
 	setHTTPTestConfig(t, "aegis.endpoint", "https://aegis.example")
-	setHTTPTestConfig(t, "cors.login-origins", []string{})
-	setHTTPTestConfig(t, "cors.management-origins", []string{})
-	for _, origins := range [][]string{GetLoginOrigins(), GetManagementOrigins()} {
-		if !reflect.DeepEqual(origins, []string{"https://aegis.example"}) {
-			t.Fatalf("empty extra policy lost primary UI: %v", origins)
-		}
-	}
-	Cfg().Set("cors.login-origins", []string{"https://login.example"})
-	Cfg().Set("cors.management-origins", []string{"https://iris.example"})
-	if !reflect.DeepEqual(GetLoginOrigins(), []string{"https://aegis.example", "https://login.example"}) || !reflect.DeepEqual(GetManagementOrigins(), []string{"https://aegis.example", "https://iris.example"}) {
-		t.Fatalf("UI policies crossed: login=%v management=%v", GetLoginOrigins(), GetManagementOrigins())
+	for _, tt := range []struct {
+		name         string
+		extras, want []string
+	}{
+		{"service only", nil, []string{"https://aegis.example"}},
+		{"trusted login frontend", []string{"https://login.example"}, []string{"https://aegis.example", "https://login.example"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setHTTPTestConfig(t, "cors.origins", tt.extras)
+			if got := GetCORSOrigins(); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("GetCORSOrigins() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
 func TestHTTPOriginValidation(t *testing.T) {
 	setHTTPTestConfig(t, "aegis.endpoint", "https://aegis.example")
-	setHTTPTestConfig(t, "cors.login-origins", []string{})
-	setHTTPTestConfig(t, "cors.management-origins", []string{})
+	setHTTPTestConfig(t, "cors.origins", []string{})
 	if err := validateHTTPOrigins(); err != nil {
-		t.Fatalf("empty optional policies rejected: %v", err)
+		t.Fatalf("empty optional origins rejected: %v", err)
 	}
-	for _, key := range []string{"cors.login-origins", "cors.management-origins"} {
-		for _, origin := range []string{"*", "null", "", "https://*.example", "https://ui.example/", "https://ui.example/path", "https://ui.example?", "https://ui.example#", "https://user@ui.example", "file://ui.example", "https://"} {
-			t.Run(key+"/"+origin, func(t *testing.T) {
-				Cfg().Set(key, []string{origin})
-				if err := validateHTTPOrigins(); err == nil {
-					t.Fatalf("invalid trusted origin accepted: %q", origin)
-				}
-				Cfg().Set(key, []string{})
-			})
-		}
-		Cfg().Set(key, []string{"https://ui.example", "http://localhost:18000"})
-		if err := validateHTTPOrigins(); err != nil {
-			t.Fatal(err)
-		}
-		Cfg().Set(key, []string{})
+	for _, origin := range []string{"*", "null", "", "https://*.example", "https://ui.example/", "https://ui.example/path", "https://ui.example?", "https://ui.example#", "https://user@ui.example", "file://ui.example", "https://"} {
+		t.Run(origin, func(t *testing.T) {
+			setHTTPTestConfig(t, "cors.origins", []string{origin})
+			if err := validateHTTPOrigins(); err == nil {
+				t.Fatalf("invalid trusted origin accepted: %q", origin)
+			}
+		})
+	}
+	Cfg().Set("cors.origins", []string{"https://ui.example", "http://localhost:18000"})
+	if err := validateHTTPOrigins(); err != nil {
+		t.Fatal(err)
 	}
 }
