@@ -415,3 +415,13 @@ d. 匹配成功 → ParseV4Public 验签
 ```
 
 > 显式令牌种类优先于 SSO 的启发式判断。`token_type` 与 Challenge 的业务 `typ` 相互独立；签发方和消费方使用 Aegis Go SDK `v0.0.2`，并重新签发不带类型标识的旧 SAT。
+
+## HTTP 请求与响应边界
+
+跨域、缓存和导航隐私按行为组合，复用独立中间件，不改变现有 PASETO 凭证和业务协议：
+
+- `middleware.CORS` 统一生成跨域响应头；`AllowedOrigins` 只消费服务配置，不解析 `client_id`、读取请求体或访问应用缓存。Cookie 会话和个人资料接口使用配置来源及凭证式 CORS；`/api/token`、`/api/revoke` 和 `/api/pubkeys` 允许任意来源读取，不开放跨域凭证。
+- 只有同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的请求属于预检；普通 OPTIONS 继续交给路由，未获允许的来源预检返回 403。预检保留独立缓存能力，响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
+- `middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和兼容旧客户端的 `Pragma: no-cache`，覆盖成功、错误及跳转响应。认证会话、个人资料、token 交换、显式 token 撤销及 Bearer 权限检查均使用此策略；公开 PASETO 公钥保留原有公共缓存策略。
+- `middleware.NoReferrer` 用于 POST 授权入口及上游身份提供方回调，独立于跨域和缓存策略。
+- `middleware.ProtectCookieRequests` 统一保护 Cookie 状态变更接口。可信来源来自服务 endpoint 配置，接受可信 Origin、同源 Fetch Metadata 或可信 Referer；跨站、非法来源和缺少来源依据的请求在解析业务请求体前返回 403。GET、HEAD 和 OPTIONS 沿用原有路由行为。token 交换、携带显式 token 的撤销及 Bearer 权限检查不挂载此防护；上游回调继续使用现有交易校验。

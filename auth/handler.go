@@ -69,11 +69,6 @@ func NewHandler(
 	}
 }
 
-// CacheManager 返回缓存管理器（用于 CORS 中间件等）
-func (h *Handler) CacheManager() *cache.Manager {
-	return h.cache
-}
-
 // Profile 返回用户信息处理器
 func (h *Handler) Profile() *profile.Handler {
 	return h.profileHandler
@@ -340,10 +335,6 @@ func (h *Handler) IDPs(c *gin.Context) {
 	var req IDPInitiateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
-		return
-	}
-	if err := validateIDPOrigin(c.GetHeader("Origin")); err != nil {
-		h.errorResponse(c, autherrors.NewInvalidRequest("untrusted idp request origin"))
 		return
 	}
 
@@ -1909,24 +1900,6 @@ func oauthAuthorizationQueryMatches(query url.Values, transaction *idp.OAuthTran
 		query.Get("code_challenge_method") == "S256" &&
 		query.Get("response_type") == "code" &&
 		query.Get("client_id") != ""
-}
-
-// validateIDPOrigin rejects browser-triggered login CSRF. Non-browser clients
-// may omit Origin; browsers cannot forge it. Pallas is served from the Aegis
-// origin, so no caller-provided redirect or origin is accepted here.
-func validateIDPOrigin(origin string) error {
-	if origin == "" {
-		return nil
-	}
-	requestOrigin, err := url.Parse(origin)
-	if err != nil || requestOrigin.Scheme == "" || requestOrigin.Host == "" || requestOrigin.Path != "" {
-		return errors.New("invalid origin")
-	}
-	trustedOrigin, err := url.Parse(config.GetEndpoint())
-	if err != nil || requestOrigin.Scheme != trustedOrigin.Scheme || requestOrigin.Host != trustedOrigin.Host {
-		return errors.New("origin is not trusted")
-	}
-	return nil
 }
 
 func oauthErrorURL(code string) string {
