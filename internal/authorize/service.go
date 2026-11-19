@@ -231,52 +231,52 @@ func (s *Service) ExchangeToken(ctx context.Context, req *TokenRequest) (*TokenR
 	}
 }
 
-// AuthenticateClient 校验 Token Endpoint 的 OAuth 客户端身份并返回已认证的 client_id。
+// AuthenticateClient 校验 Token Endpoint 的 OAuth 客户端身份并返回已认证的应用。
 // 没有应用 seed 的客户端视为公开客户端；存在 seed 的客户端必须使用 client secret 或 CAT 认证。
 func (s *Service) AuthenticateClient(
 	ctx context.Context,
 	clientID string,
 	authentication ClientAuthentication,
-) (string, error) {
+) (*cache.ApplicationWithKey, error) {
 	if authentication.Method == ClientAuthMethodCAT {
 		resolvedClientID, err := s.authenticateCAT(ctx, clientID, authentication.Credential)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		clientID = resolvedClientID
 	}
 
 	if clientID == "" {
-		return "", autherrors.NewInvalidClient("client authentication failed")
+		return nil, autherrors.NewInvalidClient("client authentication failed")
 	}
 
 	app, err := s.cache.GetApplication(ctx, clientID)
 	if err != nil {
 		logger.Warnf("[Token] 加载客户端失败 - client_id: %s, error: %v", clientID, err)
-		return "", autherrors.NewInvalidClient("client authentication failed")
+		return nil, autherrors.NewInvalidClient("client authentication failed")
 	}
 
 	confidential := len(app.ClientSecretVerifiers) > 0
 	if !confidential {
 		if authentication.Method != ClientAuthMethodNone {
-			return "", autherrors.NewInvalidClient("client authentication failed")
+			return nil, autherrors.NewInvalidClient("client authentication failed")
 		}
-		return clientID, nil
+		return app, nil
 	}
 
 	switch authentication.Method {
 	case ClientAuthMethodCAT:
-		return clientID, nil
+		return app, nil
 	case ClientAuthMethodSecretBasic, ClientAuthMethodSecretPost:
 		if authentication.Credential == "" {
-			return "", autherrors.NewInvalidClient("client authentication failed")
+			return nil, autherrors.NewInvalidClient("client authentication failed")
 		}
 		if !clientSecretMatches(app.ClientSecretVerifiers, authentication.Credential) {
-			return "", autherrors.NewInvalidClient("client authentication failed")
+			return nil, autherrors.NewInvalidClient("client authentication failed")
 		}
-		return clientID, nil
+		return app, nil
 	default:
-		return "", autherrors.NewInvalidClient("client authentication required")
+		return nil, autherrors.NewInvalidClient("client authentication required")
 	}
 }
 

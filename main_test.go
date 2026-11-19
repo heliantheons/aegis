@@ -13,6 +13,7 @@ import (
 	"github.com/heliantheon/aegis-go/guard"
 	"github.com/heliantheon/aegis/auth"
 	"github.com/heliantheon/aegis/middleware"
+	"github.com/heliantheon/aegis/profile"
 )
 
 func TestConfigureProfileTokenManagerUsesIrisServiceSeed(t *testing.T) {
@@ -38,21 +39,21 @@ func TestAuthRouteResponseTraits(t *testing.T) {
 		ResolveOrigin:    middleware.AllowedOrigins([]string{origin}),
 		AllowCredentials: true,
 	})
-	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, cookieCORS, middleware.ProtectCookieRequests(origin))
+	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, cookieCORS, middleware.ProtectCookieRequests([]string{origin}))
 	for _, tt := range []struct {
 		method, path                     string
 		status                           int
 		allowOrigin                      string
 		credentials, noStore, noReferrer bool
 	}{
-		{http.MethodPost, "/api/token", http.StatusBadRequest, "*", false, true, false},
-		{http.MethodPost, "/api/revoke", http.StatusBadRequest, "*", false, true, false},
+		{http.MethodPost, "/api/token", http.StatusBadRequest, "", false, true, false},
+		{http.MethodPost, "/api/revoke", http.StatusBadRequest, "", false, true, false},
 		{http.MethodGet, "/api/pubkeys", http.StatusBadRequest, "*", false, false, false},
-		{http.MethodPost, "/api/authorize", http.StatusBadRequest, origin, true, true, true},
+		{http.MethodPost, "/api/auth/sessions", http.StatusBadRequest, origin, true, true, true},
 		{http.MethodGet, "/api/idps/unsupported/callback", http.StatusBadRequest, "", false, true, true},
 		{http.MethodOptions, "/api/pubkeys", http.StatusNoContent, "*", false, false, false},
 		{http.MethodOptions, "/api/token", http.StatusNoContent, "*", false, false, false},
-		{http.MethodOptions, "/api/authorize", http.StatusNoContent, origin, true, false, false},
+		{http.MethodOptions, "/api/auth/sessions", http.StatusNoContent, origin, true, false, false},
 		{http.MethodPost, "/api/check", http.StatusUnauthorized, "", false, true, false},
 	} {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
@@ -89,18 +90,18 @@ func TestCookieRouteRequestProtection(t *testing.T) {
 	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, middleware.CORS(middleware.CORSOptions{
 		ResolveOrigin:    middleware.AllowedOrigins([]string{trusted}),
 		AllowCredentials: true,
-	}), middleware.ProtectCookieRequests(trusted))
-	for _, path := range []string{"/authorize", "/login", "/idps", "/binding", "/challenge", "/challenge/test", "/logout"} {
-		for _, source := range []string{"missing", "untrusted", "cross-site"} {
+	}), middleware.ProtectCookieRequests([]string{trusted}))
+	for _, path := range []string{"/auth/sessions", "/login", "/idps", "/binding", "/challenge", "/challenge/test", "/logout"} {
+		for _, source := range []string{"missing", "untrusted", "same-site rogue"} {
 			t.Run(path+"/"+source, func(t *testing.T) {
 				request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api"+path, strings.NewReader("{"))
 				request.Header.Set("Content-Type", "application/json")
 				switch source {
 				case "untrusted":
 					request.Header.Set("Origin", "https://evil.example")
-				case "cross-site":
-					request.Header.Set("Origin", trusted)
-					request.Header.Set("Sec-Fetch-Site", "cross-site")
+				case "same-site rogue":
+					request.Header.Set("Origin", "https://evil.example")
+					request.Header.Set("Sec-Fetch-Site", "same-site")
 				}
 				recorder := httptest.NewRecorder()
 				router.ServeHTTP(recorder, request)
@@ -110,14 +111,17 @@ func TestCookieRouteRequestProtection(t *testing.T) {
 			})
 		}
 	}
-	for _, path := range []string{"/authorize", "/login", "/idps", "/binding"} {
-		for _, source := range []string{"origin", "fetch metadata", "referer"} {
+	for _, path := range []string{"/auth/sessions", "/login", "/idps", "/binding"} {
+		for _, source := range []string{"origin", "cross-site trusted", "fetch metadata", "referer"} {
 			t.Run(path+"/trusted "+source, func(t *testing.T) {
 				request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api"+path, strings.NewReader("{"))
 				request.Header.Set("Content-Type", "application/json")
 				switch source {
 				case "origin":
 					request.Header.Set("Origin", trusted)
+				case "cross-site trusted":
+					request.Header.Set("Origin", trusted)
+					request.Header.Set("Sec-Fetch-Site", "cross-site")
 				case "fetch metadata":
 					request.Header.Set("Sec-Fetch-Site", "same-origin")
 				case "referer":
@@ -138,7 +142,7 @@ func TestPublicOAuthRoutesDoNotRequireCookieSourceEvidence(t *testing.T) {
 	router := gin.New()
 	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, middleware.CORS(middleware.CORSOptions{
 		ResolveOrigin: middleware.AllowedOrigins([]string{trusted}),
-	}), middleware.ProtectCookieRequests(trusted))
+	}), middleware.ProtectCookieRequests([]string{trusted}))
 	for _, tt := range []struct {
 		path   string
 		status int
@@ -157,7 +161,61 @@ func TestPublicOAuthRoutesDoNotRequireCookieSourceEvidence(t *testing.T) {
 				if recorder.Code != tt.status {
 					t.Fatalf("response = %d, body %s; want %d", recorder.Code, recorder.Body.String(), tt.status)
 				}
+				if recorder.Header().Get("Access-Control-Allow-Origin") != "" || recorder.Header().Get("Access-Control-Allow-Credentials") != "" {
+					t.Fatalf("unidentified client received CORS permission: %v", recorder.Header())
+				}
 			})
 		}
+	}
+}
+
+func TestBrowserPolicyGroupsStayIndependent(t *testing.T) {
+	const login, manager, protocol = "https://login.example", "https://atlas.example", "https://app.example"
+	if err := configureProfileTokenManager("https://aegis.example/api", "iris", bytes.Repeat([]byte{1}, 48)); err != nil {
+		t.Fatal(err)
+	}
+	uiCORS := func(origin string) gin.HandlerFunc {
+		return middleware.CORS(middleware.CORSOptions{ResolveOrigin: middleware.AllowedOrigins([]string{origin}), AllowCredentials: true})
+	}
+	handler := auth.NewHandler(nil, nil, nil, nil, nil, nil, &profile.Handler{}, nil)
+	router := gin.New()
+	registerAuthRoutes(router.Group("/api"), handler, uiCORS(login), middleware.ProtectCookieRequests([]string{login}))
+	if err := registerAccountRoutes(router.Group("/api"), handler, uiCORS(manager), "iris"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		method, path, origin string
+		status               int
+	}{
+		{"POST", "/api/auth/sessions", login, http.StatusBadRequest},
+		{"POST", "/api/auth/sessions", manager, http.StatusForbidden},
+		{"POST", "/api/auth/sessions", protocol, http.StatusForbidden},
+		{"POST", "/api/authorize", login, http.StatusNotFound},
+		{"GET", "/api/profile", manager, http.StatusUnauthorized},
+		{"PATCH", "/api/profile", manager, http.StatusUnauthorized},
+		{"GET", "/api/identities", manager, http.StatusUnauthorized},
+		{"GET", "/api/mfa", manager, http.StatusUnauthorized},
+		{"GET", "/api/profile", login, http.StatusForbidden},
+		{"GET", "/api/identities", protocol, http.StatusForbidden},
+		{"POST", "/api/mfa", login, http.StatusForbidden},
+		{"POST", "/api/mfa", protocol, http.StatusForbidden},
+	} {
+		t.Run(tt.method+tt.path+tt.origin, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, strings.NewReader("{"))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Origin", tt.origin)
+			request.Header.Set("Sec-Fetch-Site", "cross-site")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != tt.status {
+				t.Fatalf("status = %d, want %d: %s", response.Code, tt.status, response.Body.String())
+			}
+			if tt.status == http.StatusForbidden && response.Header().Get("Access-Control-Allow-Origin") != "" {
+				t.Fatalf("foreign UI origin allowed: %v", response.Header())
+			}
+			if tt.status == http.StatusUnauthorized && (response.Header().Get("Access-Control-Allow-Origin") != manager || response.Header().Get("Cache-Control") != "no-store") {
+				t.Fatalf("management response policy = %v", response.Header())
+			}
+		})
 	}
 }

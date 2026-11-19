@@ -418,10 +418,10 @@ d. 匹配成功 → ParseV4Public 验签
 
 ## HTTP 请求与响应边界
 
-跨域、缓存和导航隐私按行为组合，复用独立中间件，不改变现有 PASETO 凭证和业务协议：
+跨域、缓存和导航隐私按行为组合，复用独立中间件；现有 PASETO 凭证格式保持不变。
 
-- `middleware.CORS` 统一生成跨域响应头；`AllowedOrigins` 只消费服务配置，不解析 `client_id`、读取请求体或访问应用缓存。Cookie 会话和个人资料接口使用配置来源及凭证式 CORS；`/api/token`、`/api/revoke` 和 `/api/pubkeys` 允许任意来源读取，不开放跨域凭证。
-- 只有同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的请求属于预检；普通 OPTIONS 继续交给路由，未获允许的来源预检返回 403。预检保留独立缓存能力，响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
-- `middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和兼容旧客户端的 `Pragma: no-cache`，覆盖成功、错误及跳转响应。认证会话、个人资料、token 交换、显式 token 撤销及 Bearer 权限检查均使用此策略；公开 PASETO 公钥保留原有公共缓存策略。
-- `middleware.NoReferrer` 用于 POST 授权入口及上游身份提供方回调，独立于跨域和缓存策略。
-- `middleware.ProtectCookieRequests` 统一保护 Cookie 状态变更接口。可信来源来自服务 endpoint 配置，接受可信 Origin、同源 Fetch Metadata 或可信 Referer；跨站、非法来源和缺少来源依据的请求在解析业务请求体前返回 403。GET、HEAD 和 OPTIONS 沿用原有路由行为。token 交换、携带显式 token 的撤销及 Bearer 权限检查不挂载此防护；上游回调继续使用现有交易校验。
+- 浏览器来源分为三个独立策略：应用 `allowed_origins` 仅控制 token、revoke 及后续 UserInfo 等客户端协议操作，不授予登录或账户管理访问权。登录 UI 使用 `cors.login-origins`，账户管理 UI 使用 `cors.management-origins`；两者始终包含 Aegis endpoint，各自额外列表只扩展本组，允许空列表。示例登录 UI 为 Aegis，账户 UI 为 Iris（Pallas）。环境覆盖名为 `AEGIS_CORS_LOGIN_ORIGINS` 和 `AEGIS_CORS_MANAGEMENT_ORIGINS`，列表使用空格分隔。可信 UI origin 必须是无路径、查询、用户信息的完整 HTTP(S) origin，不允许 `*` 或 `null`。
+- `middleware.CORS` 用于静态 UI 和公开资源；不可信实际 Origin 在业务处理前返回 403。登录会话创建使用私有 `POST /api/auth/sessions`，不再提供 `POST /api/authorize` 别名。标准 `/authorize` 导航端点不开放 CORS。现有 context、connections、idps、login、binding、challenge、logout 路径归属登录组；profile、identities、mfa 路径仅使用管理组 CORS、现有 Iris Bearer guard 和 NoStore，不使用 Cookie 来源保护，也不新增权限模型。
+- `middleware.Preflight` 只处理同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的完整预检，普通 OPTIONS 和实际请求不设置 CORS 响应头。token/revoke 的通用 POST 预检允许 `*` 且不开放凭证；实际请求在验证客户端后才调用 `AllowOrigin` 检查应用策略，拒绝来源返回 403，未知客户端或请求体错误不继承通用 `*`。跨域中间件不解析请求体、`client_id` 或应用缓存；失败响应也按 Origin 变化。允许响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
+- 元数据和公钥是公开信息；`/api/pubkeys` 保留任意来源读取及公共缓存，不开放跨域凭证。`middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和 `Pragma: no-cache`，覆盖认证会话、账户管理、token、撤销和 Bearer 权限检查的成功、错误及跳转响应。`middleware.NoReferrer` 用于私有会话创建及上游身份提供方回调。
+- `middleware.ProtectCookieRequests` 保护登录组 Cookie 状态变更接口。明确受信任 Origin 即使携带 `Sec-Fetch-Site: cross-site` 也允许；不可信 Origin 即使标为 same-site/same-origin 也拒绝。Origin 缺省时保留同源 Fetch Metadata 或可信 Referer 回退；缺少来源依据返回 403。GET、HEAD 和 OPTIONS 沿用路由行为。token 交换、显式 token 撤销和 Bearer 管理接口不挂载此防护；上游回调继续使用现有交易校验。

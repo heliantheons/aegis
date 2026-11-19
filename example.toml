@@ -15,7 +15,10 @@ port = 18000
 url = "redis://:helios@127.0.0.1:6379/0"
 
 [cors]
-origins = ["https://aegis.heliannuuthus.com", "https://atlas.heliannuuthus.com"]
+# Aegis endpoint is always trusted; extras expand only their own UI group.
+# Environment: AEGIS_CORS_LOGIN_ORIGINS / AEGIS_CORS_MANAGEMENT_ORIGINS.
+login-origins = ["https://aegis.heliannuuthus.com"]
+management-origins = ["https://iris.heliannuuthus.com"]
 
 [aegis]
 endpoint = "https://aegis.heliannuuthus.com"

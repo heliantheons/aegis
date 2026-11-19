@@ -20,7 +20,7 @@ func TestCORSOriginAndCredentialCombinations(t *testing.T) {
 		vary        bool
 	}{
 		{"any origin without cookies", AnyOrigin, false, "https://client.example", "*", false},
-		{"wildcard with cookies echoes origin", AnyOrigin, true, "https://client.example", "https://client.example", true},
+		{"wildcard with cookies rejected", AnyOrigin, true, "https://client.example", "", true},
 		{"allowed origin with cookies", AllowedOrigins([]string{"https://client.example"}), true, "https://client.example", "https://client.example", true},
 		{"rejected origin varies cached response", AllowedOrigins([]string{"https://client.example"}), true, "https://other.example", "", true},
 		{"same origin request", AnyOrigin, false, "", "", false},
@@ -33,7 +33,11 @@ func TestCORSOriginAndCredentialCombinations(t *testing.T) {
 			request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/data", nil)
 			request.Header.Set("Origin", tt.origin)
 			router.ServeHTTP(recorder, request)
-			if recorder.Code != http.StatusOK || recorder.Header().Get("Access-Control-Allow-Origin") != tt.allowOrigin {
+			wantStatus := http.StatusOK
+			if tt.origin != "" && tt.allowOrigin == "" {
+				wantStatus = http.StatusForbidden
+			}
+			if recorder.Code != wantStatus || recorder.Header().Get("Access-Control-Allow-Origin") != tt.allowOrigin {
 				t.Fatalf("response = %d, headers %v", recorder.Code, recorder.Header())
 			}
 			wantCredentials := ""
@@ -85,7 +89,7 @@ func TestCORSOnlyInterceptsTruePreflights(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			reached := false
 			router := gin.New()
-			router.OPTIONS("/resource", CORS(CORSOptions{ResolveOrigin: AllowedOrigins([]string{"https://client.example"})}), func(c *gin.Context) {
+			router.OPTIONS("/resource", Preflight(CORSOptions{ResolveOrigin: AllowedOrigins([]string{"https://client.example"})}), func(c *gin.Context) {
 				reached = true
 				c.Status(http.StatusAccepted)
 			})
@@ -131,7 +135,11 @@ func TestCORSNeverReadsRequestBody(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			recorder := httptest.NewRecorder()
 			router.ServeHTTP(recorder, request)
-			if recorder.Code != http.StatusAccepted || !strings.Contains(strings.Join(recorder.Header().Values("Vary"), ","), "Origin") {
+			wantStatus := http.StatusAccepted
+			if origin != "https://client.example" {
+				wantStatus = http.StatusForbidden
+			}
+			if recorder.Code != wantStatus || !strings.Contains(strings.Join(recorder.Header().Values("Vary"), ","), "Origin") {
 				t.Fatalf("response = %d, headers %v", recorder.Code, recorder.Header())
 			}
 			wantOrigin := origin
@@ -163,7 +171,8 @@ func TestProtectCookieRequestsSourceEvidence(t *testing.T) {
 		{"malformed origin", http.MethodPost, "://invalid", "same-origin", trusted, false},
 		{"untrusted origin", http.MethodPost, "https://evil.example", "same-origin", trusted, false},
 		{"origin with path", http.MethodPost, trusted + "/path", "", "", false},
-		{"cross site wins", http.MethodPost, trusted, "cross-site", trusted, false},
+		{"trusted cross site", http.MethodPost, trusted, "cross-site", trusted, true},
+		{"rogue same site", http.MethodPost, "https://evil.example", "same-site", trusted, false},
 		{"untrusted referer", http.MethodPost, "", "", "https://evil.example/login", false},
 		{"referer prefix trick", http.MethodPost, "", "", trusted + ".evil.example/login", false},
 		{"unsafe put", http.MethodPut, "", "", "", false},
@@ -172,7 +181,7 @@ func TestProtectCookieRequestsSourceEvidence(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			reached := false
 			router := gin.New()
-			router.Handle(tt.method, "/session", ProtectCookieRequests(trusted), func(c *gin.Context) {
+			router.Handle(tt.method, "/session", ProtectCookieRequests([]string{trusted}), func(c *gin.Context) {
 				reached = true
 				c.Status(http.StatusAccepted)
 			})
@@ -191,5 +200,93 @@ func TestProtectCookieRequestsSourceEvidence(t *testing.T) {
 				t.Fatalf("response = %d, reached = %v; want %d, %v", recorder.Code, reached, wantStatus, tt.allowed)
 			}
 		})
+	}
+}
+
+func TestPreflightLeavesActualResponsesUntouched(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodOptions} {
+		router := gin.New()
+		router.Handle(method, "/token", Preflight(CORSOptions{ResolveOrigin: AnyOrigin}), func(c *gin.Context) {
+			c.Status(http.StatusBadRequest)
+		})
+		request := httptest.NewRequestWithContext(t.Context(), method, "/token", nil)
+		request.Body = unreadCORSBody{t: t}
+		request.Header.Set("Origin", "https://app.example")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("ordinary request intercepted: %d", response.Code)
+		}
+		for key := range response.Header() {
+			if strings.HasPrefix(key, "Access-Control-") {
+				t.Fatalf("actual response inherited preflight policy: %v", response.Header())
+			}
+		}
+	}
+}
+
+func TestAllowOriginChecksVerifiedClientPolicyBeforeBusiness(t *testing.T) {
+	for _, tt := range []struct {
+		name, origin string
+		origins      []string
+		allowed      bool
+	}{
+		{"nonbrowser", "", nil, true},
+		{"registered", "https://app.example", []string{"https://app.example"}, true},
+		{"unregistered", "https://rogue.example", []string{"https://app.example"}, false},
+		{"empty policy", "https://app.example", nil, false},
+		{"null", "null", []string{"null"}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reached := false
+			router := gin.New()
+			router.POST("/token", func(c *gin.Context) {
+				if !AllowOrigin(c, tt.origins) {
+					return
+				}
+				reached = true
+				c.Status(http.StatusAccepted)
+			})
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/token", nil)
+			request.Body = unreadCORSBody{t: t}
+			request.Header.Set("Origin", tt.origin)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			want := http.StatusForbidden
+			if tt.allowed {
+				want = http.StatusAccepted
+			}
+			if reached != tt.allowed || response.Code != want {
+				t.Fatalf("response = %d, business reached = %v", response.Code, reached)
+			}
+			if tt.origin != "" && !strings.Contains(strings.Join(response.Header().Values("Vary"), ","), "Origin") {
+				t.Fatal("origin-dependent response missing Vary")
+			}
+			wantOrigin := ""
+			if tt.allowed {
+				wantOrigin = tt.origin
+			}
+			if response.Header().Get("Access-Control-Allow-Origin") != wantOrigin || response.Header().Get("Access-Control-Allow-Credentials") != "" {
+				t.Fatalf("actual policy = %v", response.Header())
+			}
+			if wantOrigin != "" && (!strings.Contains(response.Header().Get("Access-Control-Expose-Headers"), "Location") || !strings.Contains(response.Header().Get("Access-Control-Expose-Headers"), "WWW-Authenticate")) {
+				t.Fatal("client cannot read redirect or challenge headers")
+			}
+		})
+	}
+}
+
+func TestCookieTrustRejectsWildcardAndNull(t *testing.T) {
+	for _, origin := range []string{"https://app.example", "null"} {
+		router := gin.New()
+		router.POST("/session", ProtectCookieRequests([]string{"*", "null"}), func(c *gin.Context) { c.Status(http.StatusAccepted) })
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/session", nil)
+		request.Header.Set("Origin", origin)
+		request.Header.Set("Sec-Fetch-Site", "same-origin")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("invalid credential trust accepted: %d", response.Code)
+		}
 	}
 }

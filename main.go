@@ -86,44 +86,22 @@ func main() {
 	})
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
+	loginOrigins := aegisconfig.GetLoginOrigins()
 	aegisCORS := middleware.CORS(middleware.CORSOptions{
-		ResolveOrigin:    middleware.AllowedOrigins(aegisconfig.GetCORSOrigins()),
+		ResolveOrigin:    middleware.AllowedOrigins(loginOrigins),
 		AllowCredentials: true,
 	})
-	cookieProtection := middleware.ProtectCookieRequests(aegisconfig.GetEndpoint())
+	cookieProtection := middleware.ProtectCookieRequests(loginOrigins)
 
 	api := r.Group("/api")
 	registerAuthRoutes(api, aegisHandler, aegisCORS, cookieProtection)
 
-	profile := aegisHandler.Profile()
-	irisGuard, err := guard.NewGin(aegisconfig.GetIrisAudience())
-	if err != nil {
+	managementCORS := middleware.CORS(middleware.CORSOptions{
+		ResolveOrigin:    middleware.AllowedOrigins(aegisconfig.GetManagementOrigins()),
+		AllowCredentials: true,
+	})
+	if err := registerAccountRoutes(api, aegisHandler, managementCORS, aegisconfig.GetIrisAudience()); err != nil {
 		logger.Fatalf("初始化 Iris 鉴权中间件失败: %v", err)
-	}
-	{
-		userRoutes := []struct {
-			method, path string
-			handler      gin.HandlerFunc
-		}{
-			{"GET", "/profile", profile.GetProfile},
-			{"PATCH", "/profile", profile.UpdateProfile},
-			{"GET", "/identities", profile.ListIdentities},
-			{"POST", "/identities/:idp", profile.BindIdentity},
-			{"DELETE", "/identities/:idp", profile.UnbindIdentity},
-			{"GET", "/mfa", profile.GetMFAStatus},
-			{"POST", "/mfa", profile.SetupMFA},
-			{"POST", "/mfa/:uid", profile.CompleteMFA},
-			{"PATCH", "/mfa", profile.UpdateMFA},
-			{"DELETE", "/mfa", profile.DeleteMFA},
-		}
-		registered := make(map[string]bool)
-		for _, route := range userRoutes {
-			api.Handle(route.method, route.path, aegisCORS, middleware.NoStore, irisGuard.Require(), route.handler)
-			if !registered[route.path] {
-				api.OPTIONS(route.path, aegisCORS)
-				registered[route.path] = true
-			}
-		}
 	}
 
 	addr := fmt.Sprintf(":%d", config.GetServerPort())
@@ -156,21 +134,24 @@ func configureProfileTokenManager(endpoint, audience string, seed []byte) error 
 }
 
 func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, aegisCORS, cookieProtection gin.HandlerFunc) {
-	crossOrigin := api.Group("", middleware.CORS(middleware.CORSOptions{
+	public := api.Group("", middleware.CORS(middleware.CORSOptions{
 		ResolveOrigin: middleware.AnyOrigin,
-		AllowMethods:  []string{"GET", "POST", "OPTIONS"},
+		AllowMethods:  []string{"GET", "OPTIONS"},
 	}))
-	crossOrigin.GET("/pubkeys", aegisHandler.PublicKeys)
-	for _, path := range []string{"/pubkeys", "/token", "/revoke"} {
-		crossOrigin.OPTIONS(path)
-	}
-	sensitive := crossOrigin.Group("", middleware.NoStore)
-	sensitive.POST("/token", aegisHandler.Token)
-	sensitive.POST("/revoke", aegisHandler.Revoke)
+	public.GET("/pubkeys", aegisHandler.PublicKeys)
+	public.OPTIONS("/pubkeys")
+	protocol := api.Group("", middleware.Preflight(middleware.CORSOptions{
+		ResolveOrigin: middleware.AnyOrigin,
+		AllowMethods:  []string{"POST", "OPTIONS"},
+	}), middleware.NoStore)
+	protocol.POST("/token", aegisHandler.Token)
+	protocol.POST("/revoke", aegisHandler.Revoke)
+	protocol.OPTIONS("/token")
+	protocol.OPTIONS("/revoke")
 
 	sessions := api.Group("", aegisCORS, middleware.NoStore, cookieProtection)
-	sessions.POST("/authorize", middleware.NoReferrer, aegisHandler.Authorize)
-	sessions.OPTIONS("/authorize")
+	sessions.POST("/auth/sessions", middleware.NoReferrer, aegisHandler.Authorize)
+	sessions.OPTIONS("/auth/sessions")
 	authRoutes := []struct {
 		method, path string
 		handler      gin.HandlerFunc
@@ -196,4 +177,36 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, aegisC
 	}
 	api.GET("/idps/:connection/callback", middleware.NoStore, middleware.NoReferrer, aegisHandler.OAuthCallback)
 	api.POST("/check", middleware.NoStore, aegisHandler.Check)
+}
+
+func registerAccountRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, managementCORS gin.HandlerFunc, audience string) error {
+	irisGuard, err := guard.NewGin(audience)
+	if err != nil {
+		return err
+	}
+	profile := aegisHandler.Profile()
+	userRoutes := []struct {
+		method, path string
+		handler      gin.HandlerFunc
+	}{
+		{"GET", "/profile", profile.GetProfile},
+		{"PATCH", "/profile", profile.UpdateProfile},
+		{"GET", "/identities", profile.ListIdentities},
+		{"POST", "/identities/:idp", profile.BindIdentity},
+		{"DELETE", "/identities/:idp", profile.UnbindIdentity},
+		{"GET", "/mfa", profile.GetMFAStatus},
+		{"POST", "/mfa", profile.SetupMFA},
+		{"POST", "/mfa/:uid", profile.CompleteMFA},
+		{"PATCH", "/mfa", profile.UpdateMFA},
+		{"DELETE", "/mfa", profile.DeleteMFA},
+	}
+	registered := make(map[string]bool)
+	for _, route := range userRoutes {
+		api.Handle(route.method, route.path, managementCORS, middleware.NoStore, irisGuard.Require(), route.handler)
+		if !registered[route.path] {
+			api.OPTIONS(route.path, managementCORS)
+			registered[route.path] = true
+		}
+	}
+	return nil
 }
