@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -72,4 +73,12 @@ func parseOIDCPrivateKey(block *pem.Block) (*rsa.PrivateKey, error) {
 		}
 	}
 	return nil, fmt.Errorf("oidc.signing-key 必须是 PKCS#1 或 PKCS#8 RSA 私钥")
+}
+
+func validateOIDCIssuer() error {
+	issuer, err := url.Parse(GetIssuer())
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return fmt.Errorf("OIDC issuer 必须是没有 userinfo、query 或 fragment 的 HTTPS URL")
+	}
+	return nil
 }

@@ -143,7 +143,7 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, corsOp
 	}
 	protocol := api.Group("", middleware.Preflight(middleware.CORSOptions{
 		ResolveOrigin: middleware.AnyOrigin,
-		AllowMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowMethods:  []string{"GET", "POST", "OPTIONS"},
 	}), middleware.NoStore)
 	protocol.GET("/userinfo", aegisHandler.UserInfo)
 	protocol.POST("/userinfo", aegisHandler.UserInfo)
@@ -154,6 +154,7 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, corsOp
 	}
 
 	api.GET("/authorize", middleware.NoStore, middleware.NoReferrer, aegisHandler.Authorize(auth.QueryParameters, auth.BrowserResponse))
+	api.POST("/authorize", middleware.NoStore, middleware.NoReferrer, aegisHandler.Authorize(auth.BodyParameters, auth.BrowserResponse))
 	sessions := api.Group("", middleware.Preflight(corsOptions), middleware.CORS(corsOptions), middleware.NoStore, cookieProtection)
 	sessions.POST("/auth/sessions", middleware.NoReferrer, aegisHandler.Authorize(auth.BodyParameters, auth.ActionResponse))
 	sessions.OPTIONS("/auth/sessions")

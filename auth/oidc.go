@@ -73,6 +73,9 @@ func (h *Handler) UserInfo(c *gin.Context) {
 		userInfoError(c, http.StatusUnauthorized, "invalid_token")
 		return
 	}
+	if !h.allowClientOrigin(c, uat.ClientID()) {
+		return
+	}
 	claims, ok := userInfoClaims(uat)
 	if !ok {
 		userInfoError(c, http.StatusForbidden, "insufficient_scope")

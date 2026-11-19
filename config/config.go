@@ -79,9 +79,8 @@ func Validate() error {
 	if _, _, err := GetOIDCSigningKeys(); err != nil {
 		errs = append(errs, err)
 	}
-	issuer, err := url.Parse(GetIssuer())
-	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
-		errs = append(errs, fmt.Errorf("OIDC issuer 必须是没有 userinfo、query 或 fragment 的 HTTPS URL"))
+	if err := validateOIDCIssuer(); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

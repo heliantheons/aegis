@@ -425,11 +425,6 @@ d. 匹配成功 → ParseV4Public 验签
 - `middleware.Preflight` 和 `middleware.CORS` 是独立中间件：前者只处理同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的完整预检，后者只校验实际请求的来源并生成响应头。静态来源场景在路由上按 `Preflight(options)`、`CORS(options)` 顺序组合；不使用模式布尔值。token/revoke 只挂载通用 POST 预检，实际请求在验证客户端后调用 `AllowOrigin` 检查应用策略，拒绝来源返回 403。跨域中间件不解析请求体、`client_id` 或应用缓存；允许响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
 - 元数据和公钥是公开信息；`/api/pubkeys` 保留任意来源读取及公共缓存，不开放跨域凭证。`middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和 `Pragma: no-cache`，覆盖认证会话、账户管理、token、撤销和 Bearer 权限检查的成功、错误及跳转响应。`middleware.NoReferrer` 用于授权入口及上游身份提供方回调。
 - `middleware.ProtectCookieRequests` 保护登录组 Cookie 状态变更接口。明确受信任 Origin 即使携带 `Sec-Fetch-Site: cross-site` 也允许；不可信 Origin 即使标为 same-site/same-origin 也拒绝。Origin 缺省时保留同源 Fetch Metadata 或可信 Referer 回退；缺少来源依据返回 403。GET、HEAD 和 OPTIONS 沿用路由行为。token 交换、显式 token 撤销和 Bearer 管理接口不挂载此防护；上游回调继续使用现有交易校验。
-- `middleware.CORS` 统一生成跨域响应头；`AllowedOrigins` 只消费服务配置，不解析 `client_id`、读取请求体或访问应用缓存。Cookie 会话和个人资料接口使用配置来源及凭证式 CORS；`/api/token`、`/api/revoke` 和 `/api/pubkeys` 允许任意来源读取，不开放跨域凭证。
-- 只有同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的请求属于预检；普通 OPTIONS 继续交给路由，未获允许的来源预检返回 403。预检保留独立缓存能力，响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
-- `middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和兼容旧客户端的 `Pragma: no-cache`，覆盖成功、错误及跳转响应。认证会话、个人资料、token 交换、显式 token 撤销及 Bearer 权限检查均使用此策略；公开 PASETO 公钥保留原有公共缓存策略。
-- `middleware.NoReferrer` 用于授权入口及上游身份提供方回调，独立于跨域和缓存策略。
-- `middleware.ProtectCookieRequests` 统一保护 Cookie 状态变更接口。可信来源来自服务 endpoint 配置，接受可信 Origin、同源 Fetch Metadata 或可信 Referer；跨站、非法来源和缺少来源依据的请求在解析业务请求体前返回 403。GET、HEAD 和 OPTIONS 沿用原有路由行为。token 交换、携带显式 token 的撤销及 Bearer 权限检查不挂载此防护；上游回调继续使用现有交易校验。
 
 ## 8. 标准 OIDC 登录与 ID Token
 
@@ -447,13 +442,15 @@ d. 匹配成功 → ParseV4Public 验签
 | --- | --- |
 | `GET /.well-known/openid-configuration` | 返回 issuer、标准端点、签名算法和支持的协议能力 |
 | `GET /jwks` | 返回当前及轮换中的 RSA 公钥 JWK，不返回私钥 |
-| `GET /authorize` | 浏览器授权入口，使用标准跳转进入登录、MFA、同意和回调流程 |
+| `GET /authorize`、`POST /authorize` | 标准浏览器授权入口，分别接收 query 和 form 请求，使用浏览器跳转，不开放 CORS |
 | `POST /token` | 接收标准 form 授权码和刷新请求；保留已有多 audience 扩展 |
 | `GET /userinfo`、`POST /userinfo` | 验证 UserInfo 资源的 PASETO UAT，校验 issuer、audience、openid scope，返回标准用户声明 |
 
 未指定 audience 的标准登录请求使用 `oidc.default-audience`（默认 Iris）；仍执行现有应用服务关系校验。UserInfo 仅接受该受众的用户访问令牌。显式请求其他业务资源的 Access Token 继续用于相应业务 API。
 
-路由独立选择参数来源（`QueryParameters` / `BodyParameters`）及响应方式（`BrowserResponse` / `ActionResponse`），共享同一授权核心，不根据 HTTP method 推断。GET 授权入口选择 query/browser，POST 授权入口选择 body/action；浏览器错误跳转前仍需验证注册的 client 与 redirect URI。
+UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确认的 client_id 检查应用 `allowed_origins`；URL 查询参数不能选择其他客户端的来源策略。跨域预检不携带 Token，先执行通用预检，实际请求仍需通过完整的凭证、来源和 scope 校验。
+
+路由独立选择参数来源（`QueryParameters` / `BodyParameters`）及响应方式（`BrowserResponse` / `ActionResponse`），共享同一授权核心，不根据 HTTP method 推断。标准 GET 授权入口选择 query/browser，标准 POST 授权入口选择 body/browser；私有 `POST /api/auth/sessions` 选择 body/action。浏览器错误跳转前仍需验证注册的 client 与 redirect URI。
 
 内部 Pallas 的 XHR 登录/MFA 操作继续使用 HTTP 300 与 `Location` 指令；浏览器顶层授权入口使用正常 HTTP 跳转。重定向 URI 精确匹配注册值，授权错误仅回到已验证的客户端 URI。`prompt`、`max_age` 与实际认证时间共同决定是否允许 SSO 复用。
 
