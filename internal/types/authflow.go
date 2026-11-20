@@ -34,14 +34,13 @@ const (
 // AuthFlow 认证流程上下文
 // auth session = flowID
 type AuthFlow struct {
-	ID               string    `json:"id"`
-	CreatedAt        time.Time `json:"created_at"`
-	ExpiresAt        time.Time `json:"expires_at"`
-	MaxExpiresAt     time.Time `json:"max_expires_at"` // 最大生命周期截止时间，超过后不可续期
-	State            FlowState `json:"state"`
-	AuthenticatedAt  time.Time `json:"authenticated_at"`
-	ConsentGranted   bool      `json:"consent_granted,omitempty"`
-	AuthorizationURL string    `json:"authorization_url,omitempty"`
+	ID              string    `json:"id"`
+	CreatedAt       time.Time `json:"created_at"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	MaxExpiresAt    time.Time `json:"max_expires_at"` // 最大生命周期截止时间，超过后不可续期
+	State           FlowState `json:"state"`
+	AuthenticatedAt time.Time `json:"authenticated_at"`
+	ConsentGranted  bool      `json:"consent_granted,omitempty"`
 
 	// 请求参数
 	Request *AuthRequest `json:"request"`
@@ -227,8 +226,11 @@ func (r *AuthRequest) GetString(key string) string {
 	return ""
 }
 
-// Set 设置扩展参数
+// Set 设置扩展参数，忽略标准字段。
 func (r *AuthRequest) Set(key string, value any) {
+	if authRequestKnownFields[key] {
+		return
+	}
 	if r.Params == nil {
 		r.Params = make(map[string]any)
 	}

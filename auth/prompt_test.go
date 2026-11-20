@@ -322,7 +322,7 @@ func TestAuthorizePromptAndSSOConsentDecisions(t *testing.T) {
 				var body string
 				if method == http.MethodPost {
 					var req types.AuthRequest
-					if _, err := bindAuthorizeQuery(authorizeQueryContext(query), &req); err != nil {
+					if err := bindAuthorizeQuery(authorizeQueryContext(query), &req); err != nil {
 						t.Fatal(err)
 					}
 					encoded, err := json.Marshal(req)

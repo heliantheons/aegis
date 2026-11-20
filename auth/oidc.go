@@ -119,13 +119,12 @@ func userInfoError(c *gin.Context, status int, code string) {
 	c.JSON(status, gin.H{"error": code})
 }
 
-func bindAuthorizeQuery(c *gin.Context, req *types.AuthRequest) (string, error) {
-	authorizationURL := "/api/authorize?" + c.Request.URL.RawQuery
+func bindAuthorizeQuery(c *gin.Context, req *types.AuthRequest) error {
 	query, err := url.ParseQuery(c.Request.URL.RawQuery)
 	if err != nil {
-		return authorizationURL, autherrors.NewInvalidRequest("invalid authorization query")
+		return autherrors.NewInvalidRequest("invalid authorization query")
 	}
-	return authorizationURL, bindAuthorizeParameters(query, req)
+	return bindAuthorizeParameters(query, req)
 }
 
 func bindAuthorizeBody(c *gin.Context, req *types.AuthRequest) error {
@@ -176,6 +175,9 @@ func bindAuthorizeParameters(query url.Values, req *types.AuthRequest) error {
 	}
 	if query.Has("audiences") && len(req.Audiences) == 0 {
 		return autherrors.NewInvalidRequest("audiences must be a nonempty JSON object")
+	}
+	for key, values := range query {
+		req.Set(key, values[0])
 	}
 	return nil
 }

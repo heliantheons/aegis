@@ -52,7 +52,7 @@ func TestBindAuthorizeParameters(t *testing.T) {
 		maxAge  uint64
 		wantErr bool
 	}{
-		{name: "standard request with optional resource"},
+		{name: "standard request"},
 		{name: "space delimited parameters", change: func(q url.Values) {
 			q.Set("scope", "  openid\tprofile\nemail ")
 			q.Set("prompt", " login \tconsent ")
@@ -64,6 +64,10 @@ func TestBindAuthorizeParameters(t *testing.T) {
 		{name: "positive max age", change: func(q url.Values) { q.Set("max_age", "3600") }, maxAge: 3600},
 		{name: "repeated state", change: func(q url.Values) { q.Add("state", "attacker") }, wantErr: true},
 		{name: "repeated redirect", change: func(q url.Values) { q.Add("redirect_uri", "https://evil.example") }, wantErr: true},
+		{name: "repeated extension", change: func(q url.Values) {
+			q.Add("resource", "one")
+			q.Add("resource", "two")
+		}, wantErr: true},
 		{name: "negative max age", change: func(q url.Values) { q.Set("max_age", "-1") }, wantErr: true},
 		{name: "fractional max age", change: func(q url.Values) { q.Set("max_age", "0.1") }, wantErr: true},
 		{name: "empty max age", change: func(q url.Values) { q.Set("max_age", "") }, wantErr: true},
@@ -87,7 +91,7 @@ func TestBindAuthorizeParameters(t *testing.T) {
 				var req types.AuthRequest
 				var err error
 				if source == "query" {
-					_, err = bindAuthorizeQuery(authorizeQueryContext(q), &req)
+					err = bindAuthorizeQuery(authorizeQueryContext(q), &req)
 				} else {
 					c, _ := gin.CreateTestContext(httptest.NewRecorder())
 					c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/authorize?client_id=attacker&redirect_uri=https://evil.example", strings.NewReader(q.Encode()))
@@ -126,17 +130,42 @@ func TestBindAuthorizeParameters(t *testing.T) {
 	}
 }
 
-func TestAuthorizationDecodersIsolateRestartURLAndIgnoreMethod(t *testing.T) {
+func TestAuthorizationDecodersIsolateSourcesAndIgnoreMethod(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	query := standardAuthorizationQuery()
 	query.Set("audience", "iris")
+	query.Set("prompt", "login consent")
+	query.Set("login_hint", "user@example.com")
+	query.Set("max_age", "0")
+	query.Set("resource", "https://api.example/resource?tenant=one&name=a+b")
+	query.Set("response_mode", "query")
+	query.Set("custom_parameter", "custom + / ?")
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequestWithContext(context.Background(), method, "/api/authorize?"+query.Encode(), strings.NewReader("invalid body"))
 		var req types.AuthRequest
-		restartURL, err := bindAuthorizeQuery(c, &req)
-		if err != nil || restartURL != "/api/authorize?"+query.Encode() || req.ClientID != "atlas" {
-			t.Fatalf("%s query decoder = %+v, restart = %q, error = %v", method, req, restartURL, err)
+		err := bindAuthorizeQuery(c, &req)
+		if err != nil || req.ClientID != "atlas" {
+			t.Fatalf("%s query decoder = %+v, error = %v", method, req, err)
+		}
+		wantParams := map[string]any{
+			"resource":         query.Get("resource"),
+			"response_mode":    "query",
+			"custom_parameter": "custom + / ?",
+		}
+		if !reflect.DeepEqual(req.Params, wantParams) || req.MaxAge == nil || *req.MaxAge != 0 {
+			t.Fatalf("query parameters = %+v, max_age = %v", req.Params, req.MaxAge)
+		}
+		flowJSON, err := json.Marshal(types.AuthFlow{Request: &req})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var flow types.AuthFlow
+		if err := json.Unmarshal(flowJSON, &flow); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(flow.Request, &req) {
+			t.Fatalf("stored request = %+v, want %+v", flow.Request, req)
 		}
 		encoded, err := json.Marshal(req)
 		if err != nil {
@@ -150,7 +179,7 @@ func TestAuthorizationDecodersIsolateRestartURLAndIgnoreMethod(t *testing.T) {
 			c.Request.Header.Set("Content-Type", body.contentType)
 			var bound types.AuthRequest
 			err = bindAuthorizeBody(c, &bound)
-			if err != nil || bound.ClientID != "atlas" || bound.Audience != "iris" || bound.State != req.State || !bound.Scope.Contains("openid") {
+			if err != nil || !reflect.DeepEqual(bound, req) {
 				t.Fatalf("%s %s body decoder = %+v, error = %v", method, body.contentType, bound, err)
 			}
 		}
@@ -183,7 +212,7 @@ func TestValidateStandardAuthorizationParameters(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var req types.AuthRequest
-			if _, err := bindAuthorizeQuery(authorizeQueryContext(standardAuthorizationQuery()), &req); err != nil {
+			if err := bindAuthorizeQuery(authorizeQueryContext(standardAuthorizationQuery()), &req); err != nil {
 				t.Fatal(err)
 			}
 			req.Audience = "iris"
@@ -261,7 +290,7 @@ func TestAuthorizeIsolatesGetAndPostParameterSources(t *testing.T) {
 		body := `{"ignored":`
 		if method == http.MethodPost {
 			var req types.AuthRequest
-			if _, err := bindAuthorizeQuery(authorizeQueryContext(query), &req); err != nil {
+			if err := bindAuthorizeQuery(authorizeQueryContext(query), &req); err != nil {
 				t.Fatal(err)
 			}
 			encoded, err := json.Marshal(req)

@@ -111,10 +111,9 @@ func GetClientClaims(c *gin.Context) *pkgtoken.ClientToken {
 // Authorize 处理 GET/POST /api/authorize。
 func (h *Handler) Authorize(c *gin.Context) {
 	req := new(types.AuthRequest)
-	var authorizationURL string
 	var bindErr error
 	if c.Request.Method == http.MethodGet {
-		authorizationURL, bindErr = bindAuthorizeQuery(c, req)
+		bindErr = bindAuthorizeQuery(c, req)
 	} else {
 		bindErr = bindAuthorizeBody(c, req)
 	}
@@ -148,7 +147,6 @@ func (h *Handler) Authorize(c *gin.Context) {
 
 	flow := types.NewAuthFlow(req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
 	flow.Application = app
-	flow.AuthorizationURL = authorizationURL
 	if len(req.Audiences) > 0 {
 		flow.Services = services
 	} else {
@@ -1045,7 +1043,7 @@ func (h *Handler) validateAudiences(ctx context.Context, clientID string, audien
 }
 
 func buildAuthContext(flow *types.AuthFlow) any {
-	base := AuthContextBase{AuthorizationURL: flow.AuthorizationURL}
+	base := AuthContextBase{Request: flow.Request}
 	if flow.Application != nil {
 		base.Application = &ApplicationInfo{
 			DomainID:    flow.Application.DomainID,
