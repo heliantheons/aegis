@@ -111,67 +111,43 @@ func GetClientClaims(c *gin.Context) *pkgtoken.ClientToken {
 // Authorize 处理 GET/POST /api/authorize。
 func (h *Handler) Authorize(c *gin.Context) {
 	req := new(types.AuthRequest)
+	isGet := c.Request.Method == http.MethodGet
 	var bindErr error
-	if c.Request.Method == http.MethodGet {
+	if isGet {
 		bindErr = bindAuthorizeQuery(c, req)
 	} else {
 		bindErr = bindAuthorizeBody(c, req)
 	}
-	app := h.prepareAuthorizationEntry(c, req, bindErr)
-	if app == nil {
+	hasClientRedirect := req.ClientID != "" && req.RedirectURI != ""
+	if bindErr != nil && (!isGet || !hasClientRedirect) {
+		authorizationError(c, nil, bindErr)
 		return
 	}
-	ctx := c.Request.Context()
-
-	audiences, authErr := collectAudiences(req)
-	if authErr != nil {
-		authorizationError(c, req, authErr)
+	if !hasClientRedirect {
+		authorizationError(c, nil, autherrors.NewInvalidRequest("client_id and redirect_uri are required"))
 		return
 	}
-
-	services, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
-	if authErr != nil {
-		authorizationError(c, req, authErr)
-		return
-	}
-
-	idpConfigs, err := h.cache.ListApplicationIDPConfigs(ctx, req.ClientID)
+	app, err := h.cache.GetApplication(c.Request.Context(), req.ClientID)
 	if err != nil {
-		authorizationError(c, req, autherrors.NewServerError("query idp configs failed"))
+		authorizationError(c, nil, autherrors.NewClientNotFoundf("application not found: %s", req.ClientID))
 		return
 	}
-	if len(idpConfigs) == 0 {
-		authorizationError(c, req, autherrors.NewNoConnectionAvailable(""))
+	if !validAuthorizationRedirect(&app.Application, req.RedirectURI) {
+		authorizationError(c, nil, autherrors.NewInvalidRequest("invalid redirect_uri"))
 		return
 	}
-
-	flow := types.NewAuthFlow(req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
-	flow.Application = app
-	if len(req.Audiences) > 0 {
-		flow.Services = services
-	} else {
-		flow.Service = &services[0]
-	}
-	flow.SetConnectionMap(h.authenticateSvc.SetConnections(idpConfigs))
-
-	if !requiresFreshAuthentication(req) {
-		if redirected := h.trySSOFastPath(c, ctx, flow); redirected {
-			return
-		}
-	}
-
-	if req.Prompt.Contains(types.PromptNone) {
-		authorizationError(c, req, autherrors.NewLoginRequired("no active SSO session"))
+	if bindErr != nil {
+		authorizationError(c, req, bindErr)
 		return
 	}
-
-	if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-		authorizationError(c, req, autherrors.NewServerError("save flow failed"))
+	if req.Audience == "" && len(req.Audiences) == 0 {
+		req.Audience = config.GetOIDCDefaultAudience()
+	}
+	if authErr := validateAuthorizeRequest(req); authErr != nil {
+		authorizationError(c, req, authErr)
 		return
 	}
-
-	setAuthSessionCookie(c, flow.ID)
-	forwardNext(c, flow, authorizationRedirect)
+	h.beginAuthorization(c, req, &app.Application)
 }
 
 // --- 上下文查询 ---
@@ -944,36 +920,58 @@ func (h *Handler) revokeAndClearSSO(c *gin.Context, openID string) {
 
 // --- Authorize 引用链 ---
 
-func (h *Handler) prepareAuthorizationEntry(c *gin.Context, req *types.AuthRequest, bindErr error) *models.Application {
-	if bindErr != nil && (c.Request.Method != http.MethodGet || req.ClientID == "" || req.RedirectURI == "") {
-		authorizationError(c, nil, bindErr)
-		return nil
-	}
-	if req.ClientID == "" || req.RedirectURI == "" {
-		authorizationError(c, nil, autherrors.NewInvalidRequest("client_id and redirect_uri are required"))
-		return nil
-	}
-	app, err := h.cache.GetApplication(c.Request.Context(), req.ClientID)
-	if err != nil {
-		authorizationError(c, nil, autherrors.NewClientNotFoundf("application not found: %s", req.ClientID))
-		return nil
-	}
-	if !validAuthorizationRedirect(&app.Application, req.RedirectURI) {
-		authorizationError(c, nil, autherrors.NewInvalidRequest("invalid redirect_uri"))
-		return nil
-	}
-	if bindErr != nil {
-		authorizationError(c, req, bindErr)
-		return nil
-	}
-	if req.Audience == "" && len(req.Audiences) == 0 {
-		req.Audience = config.GetOIDCDefaultAudience()
-	}
-	if authErr := validateAuthorizeRequest(req); authErr != nil {
+func (h *Handler) beginAuthorization(c *gin.Context, req *types.AuthRequest, app *models.Application) {
+	ctx := c.Request.Context()
+
+	audiences, authErr := collectAudiences(req)
+	if authErr != nil {
 		authorizationError(c, req, authErr)
-		return nil
+		return
 	}
-	return &app.Application
+
+	services, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
+	if authErr != nil {
+		authorizationError(c, req, authErr)
+		return
+	}
+
+	idpConfigs, err := h.cache.ListApplicationIDPConfigs(ctx, req.ClientID)
+	if err != nil {
+		authorizationError(c, req, autherrors.NewServerError("query idp configs failed"))
+		return
+	}
+	if len(idpConfigs) == 0 {
+		authorizationError(c, req, autherrors.NewNoConnectionAvailable(""))
+		return
+	}
+
+	flow := types.NewAuthFlow(req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
+	flow.Application = app
+	if len(req.Audiences) > 0 {
+		flow.Services = services
+	} else {
+		flow.Service = &services[0]
+	}
+	flow.SetConnectionMap(h.authenticateSvc.SetConnections(idpConfigs))
+
+	if !requiresFreshAuthentication(req) {
+		if redirected := h.trySSOFastPath(c, ctx, flow); redirected {
+			return
+		}
+	}
+
+	if req.Prompt.Contains(types.PromptNone) {
+		authorizationError(c, req, autherrors.NewLoginRequired("no active SSO session"))
+		return
+	}
+
+	if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
+		authorizationError(c, req, autherrors.NewServerError("save flow failed"))
+		return
+	}
+
+	setAuthSessionCookie(c, flow.ID)
+	forwardNext(c, flow, authorizationRedirect)
 }
 
 func validateAuthorizeRequest(req *types.AuthRequest) *autherrors.AuthError {
