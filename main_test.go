@@ -53,13 +53,11 @@ func TestAuthRouteResponseTraits(t *testing.T) {
 		{http.MethodPost, "/api/authorize", http.StatusBadRequest, "", false, true, true},
 		{http.MethodOptions, "/api/authorize", http.StatusNotFound, "", false, false, false},
 		{http.MethodGet, "/api/pubkeys", http.StatusBadRequest, "*", false, false, false},
-		{http.MethodPost, "/api/authorize", http.StatusBadRequest, origin, true, true, true},
 		{http.MethodGet, "/api/idps/unsupported/callback", http.StatusBadRequest, "", false, true, true},
 		{http.MethodOptions, "/api/pubkeys", http.StatusNoContent, "*", false, false, false},
 		{http.MethodOptions, "/api/jwks", http.StatusNoContent, "*", false, false, false},
 		{http.MethodOptions, "/api/token", http.StatusNoContent, "*", false, false, false},
 		{http.MethodOptions, "/api/userinfo", http.StatusNoContent, "*", false, false, false},
-		{http.MethodOptions, "/api/auth/sessions", http.StatusNoContent, origin, true, false, false},
 		{http.MethodPost, "/api/check", http.StatusUnauthorized, "", false, true, false},
 	} {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
@@ -97,7 +95,7 @@ func TestCookieRouteRequestProtection(t *testing.T) {
 		ResolveOrigin:    middleware.AllowedOrigins([]string{trusted}),
 		AllowCredentials: true,
 	}, middleware.ProtectCookieRequests([]string{trusted}))
-	for _, path := range []string{"/auth/sessions", "/consent", "/login", "/idps", "/binding", "/challenge", "/challenge/test", "/logout"} {
+	for _, path := range []string{"/consent", "/login", "/idps", "/binding", "/challenge", "/challenge/test", "/logout"} {
 		for _, source := range []string{"missing", "untrusted", "same-site rogue"} {
 			t.Run(path+"/"+source, func(t *testing.T) {
 				request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api"+path, strings.NewReader("{"))
@@ -117,7 +115,7 @@ func TestCookieRouteRequestProtection(t *testing.T) {
 			})
 		}
 	}
-	for _, path := range []string{"/auth/sessions", "/consent", "/login", "/idps", "/binding"} {
+	for _, path := range []string{"/consent", "/login", "/idps", "/binding"} {
 		for _, source := range []string{"origin", "cross-site trusted", "fetch metadata", "referer"} {
 			t.Run(path+"/trusted "+source, func(t *testing.T) {
 				request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api"+path, strings.NewReader("{"))

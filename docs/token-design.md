@@ -450,7 +450,7 @@ d. 匹配成功 → ParseV4Public 验签
 
 UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确认的 client_id 检查应用 `allowed_origins`；URL 查询参数不能选择其他客户端的来源策略。跨域预检不携带 Token，先执行通用预检，实际请求仍需通过完整的凭证、来源和 scope 校验。
 
-路由独立选择参数来源（`QueryParameters` / `BodyParameters`）及响应方式（`BrowserResponse` / `ActionResponse`），共享同一授权核心，不根据 HTTP method 推断。标准 GET 授权入口选择 query/browser，标准 POST 授权入口选择 body/browser；私有 `POST /api/auth/sessions` 选择 body/action。浏览器错误跳转前仍需验证注册的 client 与 redirect URI。
+路由独立选择参数来源（`QueryParameters` / `BodyParameters`）及响应方式（`BrowserResponse` / `ActionResponse`），共享同一授权核心，不根据 HTTP method 推断。标准 GET 授权入口选择 query/browser，标准 POST 授权入口选择 body/browser，均使用 `/api/authorize` 路径。浏览器错误跳转前仍需验证注册的 client 与 redirect URI。
 
 内部 Pallas 的 XHR 登录/MFA 操作继续使用 HTTP 300 与 `Location` 指令；浏览器顶层授权入口使用正常 HTTP 跳转。重定向 URI 精确匹配注册值，授权错误仅回到已验证的客户端 URI。`prompt`、`max_age` 与实际认证时间共同决定是否允许 SSO 复用。
 
