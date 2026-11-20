@@ -252,46 +252,45 @@ func authorizationHandler(t *testing.T, registry *authorizationRegistry) *Handle
 	return &Handler{cache: manager}
 }
 
-func TestAuthorizationAdaptersComposeIndependentlyOfMethod(t *testing.T) {
+func TestAuthorizationEntriesIsolateParameterSources(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := authorizationHandler(t, &authorizationRegistry{})
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		for _, parameters := range []AuthorizationParameters{QueryParameters, BodyParameters} {
-			for _, response := range []AuthorizationResponse{BrowserResponse, ActionResponse} {
-				query := standardAuthorizationQuery()
-				query.Set("response_type", "token")
-				body := `{"ignored":`
-				if parameters == BodyParameters {
-					var req types.AuthRequest
-					if _, err := bindAuthorizeQuery(authorizeQueryContext(query), &req); err != nil {
-						t.Fatal(err)
-					}
-					encoded, err := json.Marshal(req)
-					if err != nil {
-						t.Fatal(err)
-					}
-					body = string(encoded)
-					query.Set("redirect_uri", "https://evil.example/callback")
+		for _, entry := range []struct {
+			name    string
+			handler gin.HandlerFunc
+			body    bool
+		}{
+			{"query", h.AuthorizeGET, false},
+			{"body", h.Authorize, true},
+		} {
+			query := standardAuthorizationQuery()
+			query.Set("response_type", "token")
+			body := `{"ignored":`
+			if entry.body {
+				var req types.AuthRequest
+				if _, err := bindAuthorizeQuery(authorizeQueryContext(query), &req); err != nil {
+					t.Fatal(err)
 				}
-				request := httptest.NewRequestWithContext(context.Background(), method, "/api/authorize?"+query.Encode(), strings.NewReader(body))
-				request.Header.Set("Content-Type", gin.MIMEJSON)
-				recorder := httptest.NewRecorder()
-				router := gin.New()
-				router.Handle(method, "/api/authorize", h.Authorize(parameters, response))
-				router.ServeHTTP(recorder, request)
-				if response == ActionResponse {
-					if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || !strings.Contains(recorder.Body.String(), `"unsupported_response_type"`) {
-						t.Fatalf("method=%s parameters=%d action response = %d %q %s", method, parameters, recorder.Code, recorder.Header().Get("Location"), recorder.Body.String())
-					}
-					continue
-				}
-				u, err := url.Parse(recorder.Header().Get("Location"))
+				encoded, err := json.Marshal(req)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if recorder.Code != http.StatusSeeOther || u.Host != "atlas.example" || u.Query().Get("tenant") != "one" || u.Query().Get("state") != query.Get("state") || u.Query().Get("error") != "unsupported_response_type" {
-					t.Fatalf("method=%s parameters=%d browser response = %d %s", method, parameters, recorder.Code, u)
-				}
+				body = string(encoded)
+				query.Set("redirect_uri", "https://evil.example/callback")
+			}
+			request := httptest.NewRequestWithContext(context.Background(), method, "/api/authorize?"+query.Encode(), strings.NewReader(body))
+			request.Header.Set("Content-Type", gin.MIMEJSON)
+			recorder := httptest.NewRecorder()
+			router := gin.New()
+			router.Handle(method, "/api/authorize", entry.handler)
+			router.ServeHTTP(recorder, request)
+			u, err := url.Parse(recorder.Header().Get("Location"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusSeeOther || u.Host != "atlas.example" || u.Query().Get("tenant") != "one" || u.Query().Get("state") != query.Get("state") || u.Query().Get("error") != "unsupported_response_type" {
+				t.Fatalf("method=%s source=%s response = %d %s", method, entry.name, recorder.Code, u)
 			}
 		}
 	}
@@ -328,8 +327,8 @@ func TestAuthorizationQueryErrorsValidateRegistryBeforeRedirect(t *testing.T) {
 			}
 			recorder := httptest.NewRecorder()
 			router := gin.New()
-			router.POST("/api/authorize", h.Authorize(QueryParameters, BrowserResponse))
-			router.ServeHTTP(recorder, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/authorize?"+rawQuery, nil))
+			router.GET("/api/authorize", h.AuthorizeGET)
+			router.ServeHTTP(recorder, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/authorize?"+rawQuery, nil))
 			if (registry.lookups > 0) != tt.lookup {
 				t.Fatalf("registry lookups = %d, want lookup %v", registry.lookups, tt.lookup)
 			}
@@ -367,7 +366,7 @@ func TestAuthorizationBodyBindingErrorsRejectUnregisteredRedirects(t *testing.T)
 			request.Header.Set("Content-Type", tt.contentType)
 			recorder := httptest.NewRecorder()
 			router := gin.New()
-			router.Handle(method, "/api/authorize", h.Authorize(BodyParameters, BrowserResponse))
+			router.Handle(method, "/api/authorize", h.Authorize)
 			router.ServeHTTP(recorder, request)
 			if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || registry.lookups != tt.lookups {
 				t.Fatalf("%s %s body error = %d %q, registry lookups = %d, want %d", method, tt.contentType, recorder.Code, recorder.Header().Get("Location"), registry.lookups, tt.lookups)
@@ -376,46 +375,40 @@ func TestAuthorizationBodyBindingErrorsRejectUnregisteredRedirects(t *testing.T)
 	}
 }
 
-func TestAuthorizationBindingErrorsUseSelectedResponder(t *testing.T) {
+func TestAuthorizationBindingErrorsValidateRegisteredRedirect(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		for _, parameters := range []AuthorizationParameters{QueryParameters, BodyParameters} {
-			for _, response := range []AuthorizationResponse{BrowserResponse, ActionResponse} {
-				registry := &authorizationRegistry{}
-				h := authorizationHandler(t, registry)
-				query := standardAuthorizationQuery()
-				query.Set("max_age", "invalid")
-				target := "/api/authorize?" + query.Encode()
-				body := "ignored body"
-				if parameters == BodyParameters {
-					target = "/api/authorize?client_id=attacker&redirect_uri=https://evil.example"
-					body = query.Encode()
-				}
-				request := httptest.NewRequestWithContext(context.Background(), method, target, strings.NewReader(body))
-				request.Header.Set("Content-Type", gin.MIMEPOSTForm)
-				recorder := httptest.NewRecorder()
-				router := gin.New()
-				router.Handle(method, "/api/authorize", h.Authorize(parameters, response))
-				router.ServeHTTP(recorder, request)
-				if response == ActionResponse {
-					if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || registry.lookups != 0 {
-						t.Fatalf("%s parameters=%d action binding error = %d %q, registry lookups = %d", method, parameters, recorder.Code, recorder.Header().Get("Location"), registry.lookups)
-					}
-					continue
-				}
-				u, err := url.Parse(recorder.Header().Get("Location"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if recorder.Code != http.StatusSeeOther || registry.lookups != 1 || u.Host != "atlas.example" || u.Query().Get("error") != "invalid_request" || u.Query().Get("state") != query.Get("state") {
-					t.Fatalf("%s parameters=%d browser binding error = %d %s, registry lookups = %d", method, parameters, recorder.Code, u, registry.lookups)
-				}
+		for _, source := range []string{"query", "body"} {
+			registry := &authorizationRegistry{}
+			h := authorizationHandler(t, registry)
+			query := standardAuthorizationQuery()
+			query.Set("max_age", "invalid")
+			target := "/api/authorize?" + query.Encode()
+			body := "ignored body"
+			handler := h.AuthorizeGET
+			if source == "body" {
+				handler = h.Authorize
+				target = "/api/authorize?client_id=attacker&redirect_uri=https://evil.example"
+				body = query.Encode()
+			}
+			request := httptest.NewRequestWithContext(context.Background(), method, target, strings.NewReader(body))
+			request.Header.Set("Content-Type", gin.MIMEPOSTForm)
+			recorder := httptest.NewRecorder()
+			router := gin.New()
+			router.Handle(method, "/api/authorize", handler)
+			router.ServeHTTP(recorder, request)
+			u, err := url.Parse(recorder.Header().Get("Location"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusSeeOther || registry.lookups != 1 || u.Host != "atlas.example" || u.Query().Get("error") != "invalid_request" || u.Query().Get("state") != query.Get("state") {
+				t.Fatalf("%s source=%s binding error = %d %s, registry lookups = %d", method, source, recorder.Code, u, registry.lookups)
 			}
 		}
 	}
 }
 
-func TestAuthorizationNavigationUsesExplicitResponder(t *testing.T) {
+func TestForwardNextUsesBrowserAndActionRedirects(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		for _, tt := range []struct {

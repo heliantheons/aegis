@@ -209,23 +209,17 @@ func authorizationErrorURL(redirectURI, state, code, description string) string 
 	return u.String()
 }
 
-type authorizationResponder struct {
-	navigate       func(*gin.Context, string)
-	fail           func(*gin.Context, *types.AuthRequest, error)
-	redirectErrors bool
-}
-
 // validated is supplied only after the application registry accepts redirect_uri.
 func browserAuthorizationError(c *gin.Context, validated *types.AuthRequest, err error) {
 	if validated == nil {
-		localAuthorizationError(c, nil, err)
+		localAuthorizationError(c, err)
 		return
 	}
 	authErr := autherrors.ToAuthError(err)
 	browserRedirect(c, authorizationErrorURL(validated.RedirectURI, validated.State, authErr.Code, authErr.Description))
 }
 
-func localAuthorizationError(c *gin.Context, _ *types.AuthRequest, err error) {
+func localAuthorizationError(c *gin.Context, err error) {
 	authErr := autherrors.ToAuthError(err)
 	c.JSON(authErr.HTTPStatus, gin.H{
 		"error":             authErr.Code,
