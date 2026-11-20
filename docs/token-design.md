@@ -442,7 +442,8 @@ d. 匹配成功 → ParseV4Public 验签
 | --- | --- |
 | `GET /.well-known/openid-configuration` | 返回 issuer、标准端点、签名算法和支持的协议能力 |
 | `GET /jwks` | 返回当前及轮换中的 RSA 公钥 JWK，不返回私钥 |
-| `GET /authorize`、`POST /authorize` | 标准浏览器授权入口，分别接收 query 和 form 请求，使用浏览器跳转，不开放 CORS |
+| `GET /authorize` | 标准浏览器授权入口，读取 query，使用浏览器跳转，不开放 CORS |
+| `POST /authorize` | 保留 Pallas 授权 API，读取 body，返回 HTTP 300 + Location 或 JSON 错误；沿用可信登录前端的 CORS 和 Cookie 来源防护 |
 | `POST /token` | 接收标准 form 授权码和刷新请求；保留已有多 audience 扩展 |
 | `GET /userinfo`、`POST /userinfo` | 验证 UserInfo 资源的 PASETO UAT，校验 issuer、audience、openid scope，返回标准用户声明 |
 
@@ -450,7 +451,7 @@ d. 匹配成功 → ParseV4Public 验签
 
 UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确认的 client_id 检查应用 `allowed_origins`；URL 查询参数不能选择其他客户端的来源策略。跨域预检不携带 Token，先执行通用预检，实际请求仍需通过完整的凭证、来源和 scope 校验。
 
-`GET /api/authorize` 和 `POST /api/authorize` 统一挂载 `Authorize`。入口在本方法内绑定参数：GET 只读取 query，POST 只读取 body，随后直接执行授权流程并使用浏览器导航响应。浏览器错误跳转前仍需验证注册的 client 与 redirect URI。
+`GET /api/authorize` 和 `POST /api/authorize` 统一挂载 `Authorize`。GET 只读取 query，正常导航使用浏览器跳转；授权错误仅在 client 与 redirect URI 通过注册校验后回跳。POST 只读取 body，保留 Pallas 的 API 契约：下一步通过 HTTP 300 + `Location` 交给前端执行，错误返回本地 JSON，不自动跟随浏览器重定向；绑定失败时不查询应用注册信息。
 
 授权参数复用 `AuthRequest` 的 form 标签进行绑定，`scope` 和 `prompt` 通过现有 `SpaceDelimited.UnmarshalText` 解析，`audiences` 通过 JSON 对象绑定；不另行维护字段映射。OIDC 层额外检查参数唯一性、严格的 `max_age` 格式、支持的 `response_mode` 和非空 `audiences`，query 与 body 的参数来源保持隔离。
 

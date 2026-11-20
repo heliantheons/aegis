@@ -277,6 +277,12 @@ func TestAuthorizeIsolatesGetAndPostParameterSources(t *testing.T) {
 		router := gin.New()
 		router.Handle(method, "/api/authorize", h.Authorize)
 		router.ServeHTTP(recorder, request)
+		if method == http.MethodPost {
+			if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || !strings.Contains(recorder.Body.String(), `"error":"unsupported_response_type"`) {
+				t.Fatalf("POST action error = %d %q %s", recorder.Code, recorder.Header().Get("Location"), recorder.Body.String())
+			}
+			continue
+		}
 		u, err := url.Parse(recorder.Header().Get("Location"))
 		if err != nil {
 			t.Fatal(err)
@@ -348,7 +354,7 @@ func TestAuthorizationBodyBindingErrorsRejectUnregisteredRedirects(t *testing.T)
 		lookups     int
 	}{
 		{gin.MIMEJSON, `{"client_id":"atlas","redirect_uri":"https://evil.example/callback","response_type":`, 0},
-		{gin.MIMEPOSTForm, "client_id=atlas&redirect_uri=https%3A%2F%2Fevil.example%2Fcallback&max_age=-1", 1},
+		{gin.MIMEPOSTForm, "client_id=atlas&redirect_uri=https%3A%2F%2Fevil.example%2Fcallback&max_age=-1", 0},
 	} {
 		registry := &authorizationRegistry{}
 		h := authorizationHandler(t, registry)
@@ -383,6 +389,12 @@ func TestAuthorizationBindingErrorsValidateRegisteredRedirect(t *testing.T) {
 		router := gin.New()
 		router.Handle(method, "/api/authorize", h.Authorize)
 		router.ServeHTTP(recorder, request)
+		if method == http.MethodPost {
+			if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || registry.lookups != 0 || !strings.Contains(recorder.Body.String(), `"error":"invalid_request"`) {
+				t.Fatalf("POST binding error = %d %q %s, registry lookups = %d", recorder.Code, recorder.Header().Get("Location"), recorder.Body.String(), registry.lookups)
+			}
+			continue
+		}
 		u, err := url.Parse(recorder.Header().Get("Location"))
 		if err != nil {
 			t.Fatal(err)
@@ -393,22 +405,23 @@ func TestAuthorizationBindingErrorsValidateRegisteredRedirect(t *testing.T) {
 	}
 }
 
-func TestForwardNextUsesBrowserAndActionRedirects(t *testing.T) {
+func TestAuthorizationNavigationPreservesPostAction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		for _, tt := range []struct {
-			navigate func(*gin.Context, string)
-			status   int
-		}{{browserRedirect, http.StatusSeeOther}, {actionRedirect, http.StatusMultipleChoices}} {
-			recorder := httptest.NewRecorder()
-			router := gin.New()
-			router.Handle(method, "/api/authorize", func(c *gin.Context) {
-				forwardNext(c, &types.AuthFlow{State: types.FlowStateInitialized}, tt.navigate)
-			})
-			router.ServeHTTP(recorder, httptest.NewRequestWithContext(context.Background(), method, "/api/authorize", nil))
-			if recorder.Code != tt.status || recorder.Header().Get("Location") != config.GetEndpointLogin() {
-				t.Fatalf("%s navigation = %d %q", method, recorder.Code, recorder.Header().Get("Location"))
-			}
+	for _, tt := range []struct {
+		method string
+		status int
+	}{
+		{http.MethodGet, http.StatusSeeOther},
+		{http.MethodPost, http.StatusMultipleChoices},
+	} {
+		recorder := httptest.NewRecorder()
+		router := gin.New()
+		router.Handle(tt.method, "/api/authorize", func(c *gin.Context) {
+			forwardNext(c, &types.AuthFlow{State: types.FlowStateInitialized}, authorizationRedirect)
+		})
+		router.ServeHTTP(recorder, httptest.NewRequestWithContext(context.Background(), tt.method, "/api/authorize", nil))
+		if recorder.Code != tt.status || recorder.Header().Get("Location") != config.GetEndpointLogin() {
+			t.Fatalf("%s navigation = %d %q", tt.method, recorder.Code, recorder.Header().Get("Location"))
 		}
 	}
 }

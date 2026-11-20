@@ -209,9 +209,18 @@ func authorizationErrorURL(redirectURI, state, code, description string) string 
 	return u.String()
 }
 
+// authorizationRedirect 保留 POST API 的指令响应，GET 则由浏览器跟随跳转。
+func authorizationRedirect(c *gin.Context, location string) {
+	if c.Request.Method == http.MethodGet {
+		browserRedirect(c, location)
+		return
+	}
+	actionRedirect(c, location)
+}
+
 // validated is supplied only after the application registry accepts redirect_uri.
-func browserAuthorizationError(c *gin.Context, validated *types.AuthRequest, err error) {
-	if validated == nil {
+func authorizationError(c *gin.Context, validated *types.AuthRequest, err error) {
+	if c.Request.Method != http.MethodGet || validated == nil {
 		localAuthorizationError(c, err)
 		return
 	}

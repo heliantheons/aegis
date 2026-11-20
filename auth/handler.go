@@ -126,23 +126,23 @@ func (h *Handler) Authorize(c *gin.Context) {
 
 	audiences, authErr := collectAudiences(req)
 	if authErr != nil {
-		browserAuthorizationError(c, req, authErr)
+		authorizationError(c, req, authErr)
 		return
 	}
 
 	services, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
 	if authErr != nil {
-		browserAuthorizationError(c, req, authErr)
+		authorizationError(c, req, authErr)
 		return
 	}
 
 	idpConfigs, err := h.cache.ListApplicationIDPConfigs(ctx, req.ClientID)
 	if err != nil {
-		browserAuthorizationError(c, req, autherrors.NewServerError("query idp configs failed"))
+		authorizationError(c, req, autherrors.NewServerError("query idp configs failed"))
 		return
 	}
 	if len(idpConfigs) == 0 {
-		browserAuthorizationError(c, req, autherrors.NewNoConnectionAvailable(""))
+		authorizationError(c, req, autherrors.NewNoConnectionAvailable(""))
 		return
 	}
 
@@ -163,17 +163,17 @@ func (h *Handler) Authorize(c *gin.Context) {
 	}
 
 	if req.Prompt.Contains(types.PromptNone) {
-		browserAuthorizationError(c, req, autherrors.NewLoginRequired("no active SSO session"))
+		authorizationError(c, req, autherrors.NewLoginRequired("no active SSO session"))
 		return
 	}
 
 	if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-		browserAuthorizationError(c, req, autherrors.NewServerError("save flow failed"))
+		authorizationError(c, req, autherrors.NewServerError("save flow failed"))
 		return
 	}
 
 	setAuthSessionCookie(c, flow.ID)
-	forwardNext(c, flow, browserRedirect)
+	forwardNext(c, flow, authorizationRedirect)
 }
 
 // --- 上下文查询 ---
@@ -947,25 +947,25 @@ func (h *Handler) revokeAndClearSSO(c *gin.Context, openID string) {
 // --- Authorize 引用链 ---
 
 func (h *Handler) prepareAuthorizationEntry(c *gin.Context, req *types.AuthRequest, bindErr error) *models.Application {
-	if bindErr != nil && (req.ClientID == "" || req.RedirectURI == "") {
-		browserAuthorizationError(c, nil, bindErr)
+	if bindErr != nil && (c.Request.Method != http.MethodGet || req.ClientID == "" || req.RedirectURI == "") {
+		authorizationError(c, nil, bindErr)
 		return nil
 	}
 	logger.Debugf("[Handler] Authorize request: %+v", req)
 	app, err := h.prepareAuthorization(c, req)
 	if err != nil {
-		browserAuthorizationError(c, nil, err)
+		authorizationError(c, nil, err)
 		return nil
 	}
 	if bindErr != nil {
-		browserAuthorizationError(c, req, bindErr)
+		authorizationError(c, req, bindErr)
 		return nil
 	}
 	if req.Audience == "" && len(req.Audiences) == 0 {
 		req.Audience = config.GetOIDCDefaultAudience()
 	}
 	if authErr := validateAuthorizeRequest(req); authErr != nil {
-		browserAuthorizationError(c, req, authErr)
+		authorizationError(c, req, authErr)
 		return nil
 	}
 	return app
@@ -1136,32 +1136,32 @@ func (h *Handler) trySSOFastPath(c *gin.Context, ctx context.Context, flow *type
 	logger.Debugf("[Handler] SSO 快速路径 - Connection: %s, User: %s", flow.Connection, flow.User.OpenID)
 	if requiresConsent(flow) {
 		if flow.Request.Prompt.Contains(types.PromptNone) {
-			browserAuthorizationError(c, flow.Request, autherrors.New(http.StatusBadRequest, "consent_required", "explicit consent is required"))
+			authorizationError(c, flow.Request, autherrors.New(http.StatusBadRequest, "consent_required", "explicit consent is required"))
 			return true
 		}
 		if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-			browserAuthorizationError(c, flow.Request, autherrors.NewServerError("save flow failed"))
+			authorizationError(c, flow.Request, autherrors.NewServerError("save flow failed"))
 			return true
 		}
 		setAuthSessionCookie(c, flow.ID)
 		h.renewSSOCookie(c, ctx, ssoToken)
-		forwardNext(c, flow, browserRedirect)
+		forwardNext(c, flow, authorizationRedirect)
 		return true
 	}
 
 	authCode, err := h.authorizeAndGenerateCode(ctx, flow)
 	if err != nil {
-		browserAuthorizationError(c, flow.Request, err)
+		authorizationError(c, flow.Request, err)
 		return true
 	}
 
 	if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-		browserAuthorizationError(c, flow.Request, autherrors.NewServerError("save flow failed"))
+		authorizationError(c, flow.Request, autherrors.NewServerError("save flow failed"))
 		return true
 	}
 
 	h.renewSSOCookie(c, ctx, ssoToken)
-	browserRedirect(c, buildAuthCodeRedirectURL(flow.Request.RedirectURI, authCode))
+	authorizationRedirect(c, buildAuthCodeRedirectURL(flow.Request.RedirectURI, authCode))
 	return true
 }
 

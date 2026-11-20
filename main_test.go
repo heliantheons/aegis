@@ -50,8 +50,8 @@ func TestAuthRouteResponseTraits(t *testing.T) {
 		{http.MethodPost, "/api/revoke", http.StatusBadRequest, "", false, true, false},
 		{http.MethodGet, "/api/userinfo", http.StatusUnauthorized, "", false, true, false},
 		{http.MethodGet, "/api/authorize", http.StatusBadRequest, "", false, true, true},
-		{http.MethodPost, "/api/authorize", http.StatusBadRequest, "", false, true, true},
-		{http.MethodOptions, "/api/authorize", http.StatusNotFound, "", false, false, false},
+		{http.MethodPost, "/api/authorize", http.StatusBadRequest, origin, true, true, true},
+		{http.MethodOptions, "/api/authorize", http.StatusNoContent, origin, true, false, false},
 		{http.MethodGet, "/api/pubkeys", http.StatusBadRequest, "*", false, false, false},
 		{http.MethodGet, "/api/idps/unsupported/callback", http.StatusBadRequest, "", false, true, true},
 		{http.MethodOptions, "/api/pubkeys", http.StatusNoContent, "*", false, false, false},
@@ -95,7 +95,7 @@ func TestCookieRouteRequestProtection(t *testing.T) {
 		ResolveOrigin:    middleware.AllowedOrigins([]string{trusted}),
 		AllowCredentials: true,
 	}, middleware.ProtectCookieRequests([]string{trusted}))
-	for _, path := range []string{"/consent", "/login", "/idps", "/binding", "/challenge", "/challenge/test", "/logout"} {
+	for _, path := range []string{"/authorize", "/consent", "/login", "/idps", "/binding", "/challenge", "/challenge/test", "/logout"} {
 		for _, source := range []string{"missing", "untrusted", "same-site rogue"} {
 			t.Run(path+"/"+source, func(t *testing.T) {
 				request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api"+path, strings.NewReader("{"))
@@ -115,7 +115,7 @@ func TestCookieRouteRequestProtection(t *testing.T) {
 			})
 		}
 	}
-	for _, path := range []string{"/consent", "/login", "/idps", "/binding"} {
+	for _, path := range []string{"/authorize", "/consent", "/login", "/idps", "/binding"} {
 		for _, source := range []string{"origin", "cross-site trusted", "fetch metadata", "referer"} {
 			t.Run(path+"/trusted "+source, func(t *testing.T) {
 				request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api"+path, strings.NewReader("{"))
@@ -148,16 +148,18 @@ func TestPublicOAuthRoutesDoNotRequireCookieSourceEvidence(t *testing.T) {
 		ResolveOrigin: middleware.AllowedOrigins([]string{trusted}),
 	}, middleware.ProtectCookieRequests([]string{trusted}))
 	for _, tt := range []struct {
+		method string
 		path   string
 		status int
 	}{
-		{"/token", http.StatusBadRequest},
-		{"/userinfo", http.StatusUnauthorized},
-		{"/revoke", http.StatusBadRequest},
+		{http.MethodPost, "/token", http.StatusBadRequest},
+		{http.MethodPost, "/userinfo", http.StatusUnauthorized},
+		{http.MethodPost, "/revoke", http.StatusBadRequest},
+		{http.MethodGet, "/authorize", http.StatusBadRequest},
 	} {
 		for _, origin := range []string{"", "https://other.example"} {
 			t.Run(tt.path+"/"+origin, func(t *testing.T) {
-				request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api"+tt.path, strings.NewReader("{"))
+				request := httptest.NewRequestWithContext(context.Background(), tt.method, "/api"+tt.path, strings.NewReader("{"))
 				request.Header.Set("Content-Type", "application/json")
 				request.Header.Set("Origin", origin)
 				request.Header.Set("Sec-Fetch-Site", "cross-site")
