@@ -457,7 +457,11 @@ UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确
 
 内部 Pallas 的 XHR 登录/MFA 操作继续使用 HTTP 300 与 `Location` 指令；浏览器顶层授权入口使用正常 HTTP 跳转。重定向 URI 精确匹配注册值，授权错误仅回到已验证的客户端 URI。`prompt`、`max_age` 与实际认证时间共同决定是否允许 SSO 复用。
 
-当前没有持久化历史授权记录，每次 `openid` 登录均要求用户明确同意；有效 SSO 会话配合 `prompt=none` 时返回 `consent_required`。SSO 的原始认证时间保存在独立 Redis 元数据中，续期不重置认证时间，也不修改 SSO Token 的格式；元数据缺失或不满足 `max_age` 时重新认证。
+GET/POST 共用同一套登录与同意判断，HTTP method 只影响参数来源和响应交付。`prompt=none` 禁止交互：无有效会话返回 `login_required`，缺少所需同意返回 `consent_required`，满足登录和授权条件时直接签发授权码。`prompt=login` 或 `max_age=0` 要求重新认证；`prompt=consent` 要求本次明确同意，无 SSO 时先完成登录。`none` 不能与其他 prompt 值组合。
+
+用户同意按域、用户、应用绑定，并分别记录身份声明 scope 和各 audience 的 scope，保存在现有 Redis 中，保留时间采用 SSO TTL。同意提交原子合并范围并设置过期时间；后续相同或更小范围可复用，新增 scope 或资源需要重新确认。缓存故障不视为已经同意；拒绝本次请求不签发授权码，也不扩大已有同意。未请求 OIDC 且未显式要求 consent 的原有 OAuth 流程保持原授权策略。
+
+SSO 的原始认证时间保存在独立 Redis 元数据中，续期不重置认证时间，也不修改 SSO Token 格式。未提供 `max_age` 时可复用有效的旧 SSO，即使缺少历史认证时间也不伪造新的 `auth_time`；提供 `max_age` 时，时间未知或超限均要求重新认证。
 
 ### 8.3 密钥与迁移
 

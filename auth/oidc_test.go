@@ -436,7 +436,7 @@ func TestSSOAuthenticationAge(t *testing.T) {
 		maxAge          *uint64
 		want            bool
 	}{
-		{"unknown timestamp", time.Time{}, nil, false},
+		{"legacy session without max age", time.Time{}, nil, true},
 		{"legacy session with max age", time.Time{}, &ten, false},
 		{"fresh session", now.Add(-time.Second), &ten, true},
 		{"exact age", now.Add(-10 * time.Second), &ten, true},
@@ -608,31 +608,6 @@ func TestConsentRequiresExplicitDecision(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("consent without decision status = %d", recorder.Code)
-	}
-}
-
-func TestOIDCConsentPolicyRequiresExplicitApproval(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name    string
-		request types.AuthRequest
-		granted bool
-		want    bool
-	}{
-		{name: "existing OAuth resource", request: types.AuthRequest{Audience: "iris"}},
-		{name: "OIDC login", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Scope: []string{"openid", "profile"}}}, want: true},
-		{name: "offline access", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Scope: []string{"openid", "offline_access"}}}, want: true},
-		{name: "silent offline access", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Scope: []string{"openid", "offline_access"}, Prompt: []string{"none"}}}, want: true},
-		{name: "multi audience OIDC", request: types.AuthRequest{Audiences: map[string]*types.RequestAudienceScope{"iris": {Scope: "openid offline_access"}}}, want: true},
-		{name: "explicit prompt", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Prompt: []string{"consent"}}}, want: true},
-		{name: "approved flow", request: types.AuthRequest{AuthorizeRequestBase: types.AuthorizeRequestBase{Scope: []string{"openid", "offline_access"}}}, granted: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			flow := &types.AuthFlow{Request: &tt.request, ConsentGranted: tt.granted}
-			if got := requiresConsent(flow); got != tt.want {
-				t.Fatalf("requiresConsent() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 

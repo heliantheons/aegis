@@ -951,10 +951,17 @@ func (h *Handler) prepareAuthorizationEntry(c *gin.Context, req *types.AuthReque
 		authorizationError(c, nil, bindErr)
 		return nil
 	}
-	logger.Debugf("[Handler] Authorize request: %+v", req)
-	app, err := h.prepareAuthorization(c, req)
+	if req.ClientID == "" || req.RedirectURI == "" {
+		authorizationError(c, nil, autherrors.NewInvalidRequest("client_id and redirect_uri are required"))
+		return nil
+	}
+	app, err := h.cache.GetApplication(c.Request.Context(), req.ClientID)
 	if err != nil {
-		authorizationError(c, nil, err)
+		authorizationError(c, nil, autherrors.NewClientNotFoundf("application not found: %s", req.ClientID))
+		return nil
+	}
+	if !validAuthorizationRedirect(&app.Application, req.RedirectURI) {
+		authorizationError(c, nil, autherrors.NewInvalidRequest("invalid redirect_uri"))
 		return nil
 	}
 	if bindErr != nil {
@@ -968,20 +975,7 @@ func (h *Handler) prepareAuthorizationEntry(c *gin.Context, req *types.AuthReque
 		authorizationError(c, req, authErr)
 		return nil
 	}
-	return app
-}
-func (h *Handler) prepareAuthorization(c *gin.Context, req *types.AuthRequest) (*models.Application, error) {
-	if req.ClientID == "" || req.RedirectURI == "" {
-		return nil, autherrors.NewInvalidRequest("client_id and redirect_uri are required")
-	}
-	app, err := h.cache.GetApplication(c.Request.Context(), req.ClientID)
-	if err != nil {
-		return nil, autherrors.NewClientNotFoundf("application not found: %s", req.ClientID)
-	}
-	if !validAuthorizationRedirect(&app.Application, req.RedirectURI) {
-		return nil, autherrors.NewInvalidRequest("invalid redirect_uri")
-	}
-	return &app.Application, nil
+	return &app.Application
 }
 
 func validateAuthorizeRequest(req *types.AuthRequest) *autherrors.AuthError {
@@ -1111,8 +1105,8 @@ func buildServiceInfo(service *models.Service, application *models.Application) 
 	}
 }
 
-// trySSOFastPath 尝试 SSO 快速路径：如果用户有有效 SSO 会话，直接签发授权码并重定向。
-// 返回 true 表示已处理（成功重定向），false 表示需要走正常登录流程。
+// trySSOFastPath 复用有效 SSO，再按本次请求的同意范围执行授权。
+// 返回 true 表示已响应，false 表示需要进入登录流程。
 func (h *Handler) trySSOFastPath(c *gin.Context, ctx context.Context, flow *types.AuthFlow) bool {
 	ssoToken, ssoUser := h.resolveSSO(c, ctx, flow.Application)
 	if ssoUser == nil {
@@ -1122,10 +1116,10 @@ func (h *Handler) trySSOFastPath(c *gin.Context, ctx context.Context, flow *type
 	if !ssoAuthenticationFresh(authenticatedAt, flow.Request.MaxAge, time.Now()) {
 		return false
 	}
-	flow.AuthenticatedAt = authenticatedAt
-
+	// 恢复原认证时间，不将 SSO 复用当成一次新的身份认证。
 	flow.User = ssoUser
-	flow.SetAuthenticated(ssoUser)
+	flow.State = types.FlowStateAuthenticated
+	flow.AuthenticatedAt = authenticatedAt
 
 	for conn, cfg := range flow.ConnectionMap {
 		if cfg.Type == types.ConnTypeIDP {
@@ -1134,7 +1128,12 @@ func (h *Handler) trySSOFastPath(c *gin.Context, ctx context.Context, flow *type
 		}
 	}
 	logger.Debugf("[Handler] SSO 快速路径 - Connection: %s, User: %s", flow.Connection, flow.User.OpenID)
-	if requiresConsent(flow) {
+	consent, err := h.requiresConsent(ctx, flow)
+	if err != nil {
+		authorizationError(c, flow.Request, autherrors.NewServerError("check consent failed"))
+		return true
+	}
+	if consent {
 		if flow.Request.Prompt.Contains(types.PromptNone) {
 			authorizationError(c, flow.Request, autherrors.New(http.StatusBadRequest, "consent_required", "explicit consent is required"))
 			return true

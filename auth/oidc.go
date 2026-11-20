@@ -220,20 +220,18 @@ func authorizationRedirect(c *gin.Context, location string) {
 
 // validated is supplied only after the application registry accepts redirect_uri.
 func authorizationError(c *gin.Context, validated *types.AuthRequest, err error) {
+	authErr := autherrors.ToAuthError(err)
+	if validated != nil && validated.Prompt.Contains(types.PromptNone) && authErr.Code == autherrors.CodeIdentityRequired {
+		authErr = autherrors.New(http.StatusBadRequest, "interaction_required", "additional identity verification is required")
+	}
 	if c.Request.Method != http.MethodGet || validated == nil {
-		localAuthorizationError(c, err)
+		c.JSON(authErr.HTTPStatus, gin.H{
+			"error":             authErr.Code,
+			"error_description": authErr.Description,
+		})
 		return
 	}
-	authErr := autherrors.ToAuthError(err)
 	browserRedirect(c, authorizationErrorURL(validated.RedirectURI, validated.State, authErr.Code, authErr.Description))
-}
-
-func localAuthorizationError(c *gin.Context, err error) {
-	authErr := autherrors.ToAuthError(err)
-	c.JSON(authErr.HTTPStatus, gin.H{
-		"error":             authErr.Code,
-		"error_description": authErr.Description,
-	})
 }
 
 func withAuthorizationURL(target, authorizationURL string) string {
@@ -271,10 +269,13 @@ func (h *Handler) ssoAuthenticatedAt(c *gin.Context, ctx context.Context, domain
 }
 
 func ssoAuthenticationFresh(authenticatedAt time.Time, maxAge *uint64, now time.Time) bool {
-	if authenticatedAt.IsZero() || authenticatedAt.After(now) {
+	if authenticatedAt.After(now) {
 		return false
 	}
-	return maxAge == nil || (*maxAge != 0 && uint64(now.Unix()-authenticatedAt.Unix()) <= *maxAge)
+	if maxAge == nil {
+		return true
+	}
+	return !authenticatedAt.IsZero() && *maxAge != 0 && uint64(now.Unix()-authenticatedAt.Unix()) <= *maxAge
 }
 
 // copySSOAuthTimes 续期仅延长元数据存活时间，不重置任何域的认证时间。
@@ -301,29 +302,18 @@ func (h *Handler) copySSOAuthTimes(c *gin.Context, ctx context.Context, newToken
 	}
 }
 
-// requiresConsent 没有持久化历史授权时，OIDC scope 必须由当前用户明确同意。
-func requiresConsent(flow *types.AuthFlow) bool {
-	if flow.ConsentGranted {
-		return false
-	}
-	if flow.Request.Prompt.Contains(types.PromptConsent) || flow.Request.Scope.Contains("openid") {
+func (h *Handler) requestConsent(c *gin.Context, ctx context.Context, flow *types.AuthFlow, navigate func(*gin.Context, string)) bool {
+	consent, err := h.requiresConsent(ctx, flow)
+	if err != nil {
+		authorizationError(c, flow.Request, autherrors.NewServerError("check consent failed"))
 		return true
 	}
-	for _, audience := range flow.Request.Audiences {
-		if audience != nil {
-			for scope := range strings.FieldsSeq(audience.Scope) {
-				if scope == "openid" {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-func (h *Handler) requestConsent(c *gin.Context, ctx context.Context, flow *types.AuthFlow, navigate func(*gin.Context, string)) bool {
-	if !requiresConsent(flow) {
+	if !consent {
 		return false
+	}
+	if flow.Request.Prompt.Contains(types.PromptNone) {
+		authorizationError(c, flow.Request, autherrors.New(http.StatusBadRequest, "consent_required", "explicit consent is required"))
+		return true
 	}
 	h.issueSSOCookie(c, ctx, flow)
 	setAuthSessionCookie(c, flow.ID)
@@ -336,7 +326,16 @@ func (h *Handler) consentFlow(c *gin.Context) *types.AuthFlow {
 	if flow == nil {
 		return nil
 	}
-	if flow.State != types.FlowStateAuthenticated || flow.User == nil || flow.Application == nil || !requiresConsent(flow) {
+	if flow.State != types.FlowStateAuthenticated || flow.User == nil || flow.Application == nil || flow.ConsentGranted {
+		h.errorResponse(c, autherrors.NewInvalidRequest("no pending consent"))
+		return nil
+	}
+	consent, err := h.requiresConsent(c.Request.Context(), flow)
+	if err != nil {
+		h.errorResponse(c, autherrors.NewServerError("check consent failed"))
+		return nil
+	}
+	if !consent {
 		h.errorResponse(c, autherrors.NewInvalidRequest("no pending consent"))
 		return nil
 	}
@@ -396,6 +395,10 @@ func (h *Handler) Consent(c *gin.Context) {
 		flow.Fail(autherrors.NewAccessDenied("consent denied"))
 		clearAuthSessionCookie(c)
 		actionRedirect(c, authorizationErrorURL(flow.Request.RedirectURI, flow.Request.State, "access_denied", "consent denied"))
+		return
+	}
+	if err := h.cache.GrantConsent(ctx, flow.Application.DomainID, flow.User.OpenID, flow.Application.AppID, consentScopes(flow.Request), config.GetSSOTTL()); err != nil {
+		h.errorResponse(c, autherrors.NewServerError("save consent failed"))
 		return
 	}
 	flow.ConsentGranted = true
