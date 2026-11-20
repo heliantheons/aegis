@@ -22,55 +22,47 @@ type OriginResolver func(string) string
 type CORSOptions struct {
 	ResolveOrigin    OriginResolver
 	AllowCredentials bool
-	AllowMethods     []string
+	AllowMethods     []string // 仅用于预检响应。
 }
 
 // AnyOrigin 允许任意来源读取不携带凭证的响应。
 func AnyOrigin(_ string) string { return wildcard }
 
-// CORS 使用同一实现处理预检、凭证和响应头暴露。
+// CORS 校验实际请求的来源并设置跨域响应头。
 func CORS(options CORSOptions) gin.HandlerFunc {
-	return cors(options, false)
-}
-
-// Preflight handles only complete browser preflight requests, leaving actual policy to handlers.
-func Preflight(options CORSOptions) gin.HandlerFunc {
-	return cors(options, true)
-}
-
-func cors(options CORSOptions, preflightOnly bool) gin.HandlerFunc {
-	methods := defaultAllowMethods
-	if len(options.AllowMethods) > 0 {
-		methods = strings.Join(options.AllowMethods, ", ")
-	}
 	return func(c *gin.Context) {
-		origin := c.GetHeader("Origin")
-		preflight := c.Request.Method == http.MethodOptions && origin != "" && c.GetHeader("Access-Control-Request-Method") != ""
-		if preflightOnly && !preflight {
-			c.Next()
-			return
-		}
-		allowed := false
-		if origin != "" {
-			allowed = setCORSHeaders(c, &options, origin, methods)
-			if !allowed {
-				c.AbortWithStatus(http.StatusForbidden)
-				return
-			}
-		}
-		if preflight {
-			if !allowed {
-				c.AbortWithStatus(http.StatusForbidden)
-				return
-			}
-			c.AbortWithStatus(http.StatusNoContent)
+		if origin := c.GetHeader("Origin"); origin != "" && !setCORSHeaders(c, &options, origin) {
+			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
 		c.Next()
 	}
 }
 
-func setCORSHeaders(c *gin.Context, options *CORSOptions, origin, methods string) bool {
+// Preflight 处理完整的 CORS 预检；其他请求继续交给后续中间件。
+func Preflight(options CORSOptions) gin.HandlerFunc {
+	methods := defaultAllowMethods
+	if len(options.AllowMethods) > 0 {
+		methods = strings.Join(options.AllowMethods, ", ")
+	}
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if c.Request.Method != http.MethodOptions || origin == "" || c.GetHeader("Access-Control-Request-Method") == "" {
+			c.Next()
+			return
+		}
+		if !setCORSHeaders(c, &options, origin) {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		c.Header("Access-Control-Allow-Methods", methods)
+		c.Header("Access-Control-Allow-Headers", defaultAllowHeaders)
+		c.Header("Access-Control-Max-Age", defaultMaxAge)
+		c.AbortWithStatus(http.StatusNoContent)
+	}
+}
+
+func setCORSHeaders(c *gin.Context, options *CORSOptions, origin string) bool {
 	allowedOrigin := ""
 	if options.ResolveOrigin != nil {
 		allowedOrigin = options.ResolveOrigin(origin)
@@ -82,10 +74,7 @@ func setCORSHeaders(c *gin.Context, options *CORSOptions, origin, methods string
 		return false
 	}
 	c.Header("Access-Control-Allow-Origin", allowedOrigin)
-	c.Header("Access-Control-Allow-Methods", methods)
-	c.Header("Access-Control-Allow-Headers", defaultAllowHeaders)
 	c.Header("Access-Control-Expose-Headers", defaultExposeHeaders)
-	c.Header("Access-Control-Max-Age", defaultMaxAge)
 	if options.AllowCredentials {
 		c.Header("Access-Control-Allow-Credentials", "true")
 	}

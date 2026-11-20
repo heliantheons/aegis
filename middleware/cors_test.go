@@ -57,7 +57,8 @@ func TestCORSOriginAndCredentialCombinations(t *testing.T) {
 
 func TestCORSPreflightDoesNotExposePrivateResponsePolicy(t *testing.T) {
 	router := gin.New()
-	group := router.Group("", CORS(CORSOptions{ResolveOrigin: AnyOrigin, AllowMethods: []string{"GET", "POST", "OPTIONS"}}), NoStore)
+	options := CORSOptions{ResolveOrigin: AnyOrigin, AllowMethods: []string{"GET", "POST", "OPTIONS"}}
+	group := router.Group("", Preflight(options), CORS(options), NoStore)
 	group.OPTIONS("/resource", func(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "preflight reached resource"})
 	})
@@ -74,7 +75,7 @@ func TestCORSPreflightDoesNotExposePrivateResponsePolicy(t *testing.T) {
 	}
 }
 
-func TestCORSOnlyInterceptsTruePreflights(t *testing.T) {
+func TestPreflightOnlyInterceptsTruePreflights(t *testing.T) {
 	for _, tt := range []struct {
 		name, origin, requestedMethod string
 		status                        int

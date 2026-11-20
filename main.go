@@ -87,14 +87,14 @@ func main() {
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	loginOrigins := aegisconfig.GetCORSOrigins()
-	aegisCORS := middleware.CORS(middleware.CORSOptions{
+	corsOptions := middleware.CORSOptions{
 		ResolveOrigin:    middleware.AllowedOrigins(loginOrigins),
 		AllowCredentials: true,
-	})
+	}
 	cookieProtection := middleware.ProtectCookieRequests(loginOrigins)
 
 	api := r.Group("/api")
-	registerAuthRoutes(api, aegisHandler, aegisCORS, cookieProtection)
+	registerAuthRoutes(api, aegisHandler, corsOptions, cookieProtection)
 
 	if err := registerAccountRoutes(api, aegisHandler, aegisconfig.GetIrisAudience()); err != nil {
 		logger.Fatalf("初始化 Iris 鉴权中间件失败: %v", err)
@@ -129,11 +129,12 @@ func configureProfileTokenManager(endpoint, audience string, seed []byte) error 
 	return guard.NewServiceTokenManager(endpoint, audience, seed)
 }
 
-func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, aegisCORS, cookieProtection gin.HandlerFunc) {
-	public := api.Group("", middleware.CORS(middleware.CORSOptions{
+func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, corsOptions middleware.CORSOptions, cookieProtection gin.HandlerFunc) {
+	publicOptions := middleware.CORSOptions{
 		ResolveOrigin: middleware.AnyOrigin,
 		AllowMethods:  []string{"GET", "OPTIONS"},
-	}))
+	}
+	public := api.Group("", middleware.Preflight(publicOptions), middleware.CORS(publicOptions))
 	public.GET("/pubkeys", aegisHandler.PublicKeys)
 	public.OPTIONS("/pubkeys")
 	protocol := api.Group("", middleware.Preflight(middleware.CORSOptions{
@@ -145,7 +146,7 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, aegisC
 	protocol.OPTIONS("/token")
 	protocol.OPTIONS("/revoke")
 
-	sessions := api.Group("", aegisCORS, middleware.NoStore, cookieProtection)
+	sessions := api.Group("", middleware.Preflight(corsOptions), middleware.CORS(corsOptions), middleware.NoStore, cookieProtection)
 	sessions.POST("/auth/sessions", middleware.NoReferrer, aegisHandler.Authorize)
 	sessions.OPTIONS("/auth/sessions")
 	authRoutes := []struct {

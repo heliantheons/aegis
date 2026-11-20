@@ -35,11 +35,11 @@ func TestAuthRouteResponseTraits(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const origin = "https://client.example"
 	router := gin.New()
-	cookieCORS := middleware.CORS(middleware.CORSOptions{
+	cookieOptions := middleware.CORSOptions{
 		ResolveOrigin:    middleware.AllowedOrigins([]string{origin}),
 		AllowCredentials: true,
-	})
-	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, cookieCORS, middleware.ProtectCookieRequests([]string{origin}))
+	}
+	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, cookieOptions, middleware.ProtectCookieRequests([]string{origin}))
 	for _, tt := range []struct {
 		method, path                     string
 		status                           int
@@ -87,10 +87,10 @@ func TestAuthRouteResponseTraits(t *testing.T) {
 func TestCookieRouteRequestProtection(t *testing.T) {
 	const trusted = "https://login.example"
 	router := gin.New()
-	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, middleware.CORS(middleware.CORSOptions{
+	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, middleware.CORSOptions{
 		ResolveOrigin:    middleware.AllowedOrigins([]string{trusted}),
 		AllowCredentials: true,
-	}), middleware.ProtectCookieRequests([]string{trusted}))
+	}, middleware.ProtectCookieRequests([]string{trusted}))
 	for _, path := range []string{"/auth/sessions", "/login", "/idps", "/binding", "/challenge", "/challenge/test", "/logout"} {
 		for _, source := range []string{"missing", "untrusted", "same-site rogue"} {
 			t.Run(path+"/"+source, func(t *testing.T) {
@@ -140,9 +140,9 @@ func TestCookieRouteRequestProtection(t *testing.T) {
 func TestPublicOAuthRoutesDoNotRequireCookieSourceEvidence(t *testing.T) {
 	const trusted = "https://login.example"
 	router := gin.New()
-	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, middleware.CORS(middleware.CORSOptions{
+	registerAuthRoutes(router.Group("/api"), &auth.Handler{}, middleware.CORSOptions{
 		ResolveOrigin: middleware.AllowedOrigins([]string{trusted}),
-	}), middleware.ProtectCookieRequests([]string{trusted}))
+	}, middleware.ProtectCookieRequests([]string{trusted}))
 	for _, tt := range []struct {
 		path   string
 		status int
@@ -174,10 +174,10 @@ func TestLoginCORSDoesNotExposeAccountRoutes(t *testing.T) {
 	if err := configureProfileTokenManager("https://aegis.example/api", "iris", bytes.Repeat([]byte{1}, 48)); err != nil {
 		t.Fatal(err)
 	}
-	loginCORS := middleware.CORS(middleware.CORSOptions{ResolveOrigin: middleware.AllowedOrigins([]string{login}), AllowCredentials: true})
+	loginOptions := middleware.CORSOptions{ResolveOrigin: middleware.AllowedOrigins([]string{login}), AllowCredentials: true}
 	handler := auth.NewHandler(nil, nil, nil, nil, nil, nil, &profile.Handler{}, nil)
 	router := gin.New()
-	registerAuthRoutes(router.Group("/api"), handler, loginCORS, middleware.ProtectCookieRequests([]string{login}))
+	registerAuthRoutes(router.Group("/api"), handler, loginOptions, middleware.ProtectCookieRequests([]string{login}))
 	if err := registerAccountRoutes(router.Group("/api"), handler, "iris"); err != nil {
 		t.Fatal(err)
 	}
