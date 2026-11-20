@@ -1,121 +1,117 @@
 package token
 
 import (
+	"context"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
+	"math/big"
+	"time"
 
-	"aidanwoods.dev/go-paseto"
+	"github.com/golang-jwt/jwt/v5"
 
-	pkgtoken "github.com/heliantheon/aegis-go/utilities/token"
+	"github.com/heliantheon/aegis/config"
 )
 
-const ClaimNickname = "nic"
-const ClaimPicture = "pic"
-const ClaimNonce = "nonce"
-
-const TokenTypeIDToken pkgtoken.TokenType = "id"
-
-// IDToken represents an OpenID Connect-style ID Token.
-// Signed with the domain key (v4.public), no payload encryption.
-// Contains basic user profile for frontend display only.
-type IDToken struct {
-	pkgtoken.Claims
-	nickname string
-	picture  string
-	nonce    string
+// IDTokenClaims 是面向登录客户端的 OIDC 身份声明，与 PASETO 访问令牌分离。
+type IDTokenClaims struct {
+	jwt.RegisteredClaims
+	AuthTime    *jwt.NumericDate `json:"auth_time,omitempty"`
+	Nonce       string           `json:"nonce,omitempty"`
+	Nickname    string           `json:"nickname,omitempty"`
+	Picture     string           `json:"picture,omitempty"`
+	Email       string           `json:"email,omitempty"`
+	PhoneNumber string           `json:"phone_number,omitempty"`
 }
 
-// ==================== Builder ====================
-
-type IDTokenBuilder struct {
-	nickname string
-	picture  string
-	nonce    string
+type idTokenSigner struct {
+	privateKey *rsa.PrivateKey
+	kid        string
+	keys       []map[string]string
 }
 
-func NewIDTokenBuilder() *IDTokenBuilder {
-	return &IDTokenBuilder{}
-}
-
-func (b *IDTokenBuilder) Nickname(nickname string) *IDTokenBuilder {
-	b.nickname = nickname
-	return b
-}
-
-func (b *IDTokenBuilder) Picture(picture string) *IDTokenBuilder {
-	b.picture = picture
-	return b
-}
-
-func (b *IDTokenBuilder) Nonce(nonce string) *IDTokenBuilder {
-	b.nonce = nonce
-	return b
-}
-
-func (b *IDTokenBuilder) Build(claims pkgtoken.Claims) pkgtoken.Token {
-	return &IDToken{
-		Claims:   claims,
-		nickname: b.nickname,
-		picture:  b.picture,
-		nonce:    b.nonce,
-	}
-}
-
-// ==================== Token Interface ====================
-
-func (t *IDToken) Type() pkgtoken.TokenType {
-	return TokenTypeIDToken
-}
-
-func (t *IDToken) Build() (*paseto.Token, error) {
-	pt := paseto.NewToken()
-	if err := t.SetStandardClaims(&pt); err != nil {
-		return nil, fmt.Errorf("set standard claims: %w", err)
-	}
-	if t.nickname != "" {
-		if err := pt.Set(ClaimNickname, t.nickname); err != nil {
-			return nil, fmt.Errorf("set nickname: %w", err)
+func newIDTokenSigner(privateKey *rsa.PrivateKey, publicKeys []*rsa.PublicKey) *idTokenSigner {
+	signer := &idTokenSigner{privateKey: privateKey}
+	seen := make(map[string]bool, len(publicKeys))
+	for _, publicKey := range publicKeys {
+		jwk := oidcPublicKey(publicKey)
+		if seen[jwk["kid"]] {
+			continue
 		}
+		seen[jwk["kid"]] = true
+		signer.keys = append(signer.keys, jwk)
 	}
-	if t.picture != "" {
-		if err := pt.Set(ClaimPicture, t.picture); err != nil {
-			return nil, fmt.Errorf("set picture: %w", err)
-		}
-	}
-	if t.nonce != "" {
-		if err := pt.Set(ClaimNonce, t.nonce); err != nil {
-			return nil, fmt.Errorf("set nonce: %w", err)
-		}
-	}
-	return &pt, nil
+	signer.kid = oidcPublicKey(&privateKey.PublicKey)["kid"]
+	return signer
 }
 
-func (t *IDToken) ClientID() string { return t.Audience() }
+func oidcPublicKey(publicKey *rsa.PublicKey) map[string]string {
+	n := base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes())
+	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(publicKey.E)).Bytes())
+	// RFC 7638：成员按字典序排列后计算 JWK thumbprint。
+	thumbprint := sha256.Sum256([]byte(`{"e":"` + e + `","kty":"RSA","n":"` + n + `"}`))
+	return map[string]string{
+		"kty": "RSA", "use": "sig", "alg": "RS256",
+		"kid": base64.RawURLEncoding.EncodeToString(thumbprint[:]), "n": n, "e": e,
+	}
+}
 
-func (t *IDToken) GetNickname() string { return t.nickname }
+func (s *Service) oidcSigningKey() (*idTokenSigner, error) {
+	s.oidcOnce.Do(func() {
+		privateKey, publicKeys, err := config.GetOIDCSigningKeys()
+		if err != nil {
+			s.oidcErr = err
+			return
+		}
+		s.oidcSigner = newIDTokenSigner(privateKey, publicKeys)
+	})
+	return s.oidcSigner, s.oidcErr
+}
 
-func (t *IDToken) GetPicture() string { return t.picture }
-
-// ==================== Parse ====================
-
-func ParseIDToken(pasetoToken *paseto.Token) (*IDToken, error) {
-	claims, err := pkgtoken.ParseClaims(pasetoToken)
+// OIDCKeySet 返回当前签名公钥及尚未退役的轮换公钥，永不暴露私钥。
+func (s *Service) OIDCKeySet() (map[string]any, error) {
+	signer, err := s.oidcSigningKey()
 	if err != nil {
-		return nil, fmt.Errorf("parse claims: %w", err)
+		return nil, err
 	}
+	return map[string]any{"keys": signer.keys}, nil
+}
 
-	var nickname string
-	if err := pasetoToken.Get(ClaimNickname, &nickname); err != nil {
-		nickname = ""
+// IssueIDToken 使用独立 RSA 密钥签发 RS256 JWT，不进入 PASETO 签发链路。
+func (s *Service) IssueIDToken(ctx context.Context, claims IDTokenClaims) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-
-	var picture string
-	if err := pasetoToken.Get(ClaimPicture, &picture); err != nil {
-		picture = ""
+	if claims.Subject == "" || len(claims.Subject) > 255 || len(claims.Audience) != 1 || claims.Audience[0] == "" {
+		return "", fmt.Errorf("OIDC ID Token 必须有用户 subject 和唯一 client audience")
 	}
+	if claims.IssuedAt == nil || claims.ExpiresAt == nil || !claims.ExpiresAt.After(claims.IssuedAt.Time) {
+		return "", fmt.Errorf("OIDC ID Token 时间声明无效")
+	}
+	claims.Issuer = s.issuer
+	signer, err := s.oidcSigningKey()
+	if err != nil {
+		return "", fmt.Errorf("加载 OIDC 签名密钥失败: %w", err)
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = signer.kid
+	encoded, err := token.SignedString(signer.privateKey)
+	if err != nil {
+		return "", fmt.Errorf("签发 OIDC ID Token 失败: %w", err)
+	}
+	return encoded, nil
+}
 
-	return &IDToken{
-		Claims:   claims,
-		nickname: nickname,
-		picture:  picture,
-	}, nil
+// NewIDTokenClaims 构建具有标准时间语义的 OIDC 身份声明。
+func NewIDTokenClaims(subject, clientID string, authenticatedAt time.Time, lifetime time.Duration) IDTokenClaims {
+	now := time.Now()
+	claims := IDTokenClaims{RegisteredClaims: jwt.RegisteredClaims{
+		Subject: subject, Audience: jwt.ClaimStrings{clientID},
+		IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(lifetime)),
+	}}
+	if !authenticatedAt.IsZero() {
+		claims.AuthTime = jwt.NewNumericDate(authenticatedAt)
+	}
+	return claims
 }

@@ -135,17 +135,25 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, corsOp
 		AllowMethods:  []string{"GET", "OPTIONS"},
 	}
 	public := api.Group("", middleware.Preflight(publicOptions), middleware.CORS(publicOptions))
+	public.GET("/.well-known/openid-configuration", aegisHandler.Discovery)
+	public.GET("/jwks", aegisHandler.JWKS)
 	public.GET("/pubkeys", aegisHandler.PublicKeys)
-	public.OPTIONS("/pubkeys")
+	for _, path := range []string{"/.well-known/openid-configuration", "/jwks", "/pubkeys"} {
+		public.OPTIONS(path)
+	}
 	protocol := api.Group("", middleware.Preflight(middleware.CORSOptions{
 		ResolveOrigin: middleware.AnyOrigin,
-		AllowMethods:  []string{"POST", "OPTIONS"},
+		AllowMethods:  []string{"GET", "POST", "OPTIONS"},
 	}), middleware.NoStore)
+	protocol.GET("/userinfo", aegisHandler.UserInfo)
+	protocol.POST("/userinfo", aegisHandler.UserInfo)
 	protocol.POST("/token", aegisHandler.Token)
 	protocol.POST("/revoke", aegisHandler.Revoke)
-	protocol.OPTIONS("/token")
-	protocol.OPTIONS("/revoke")
+	for _, path := range []string{"/userinfo", "/token", "/revoke"} {
+		protocol.OPTIONS(path)
+	}
 
+	api.GET("/authorize", middleware.NoStore, middleware.NoReferrer, aegisHandler.Authorize)
 	sessions := api.Group("", middleware.Preflight(corsOptions), middleware.CORS(corsOptions), middleware.NoStore, cookieProtection)
 	sessions.POST("/authorize", middleware.NoReferrer, aegisHandler.Authorize)
 	sessions.OPTIONS("/authorize")
@@ -153,6 +161,8 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, corsOp
 		method, path string
 		handler      gin.HandlerFunc
 	}{
+		{"GET", "/consent", aegisHandler.GetConsent},
+		{"POST", "/consent", aegisHandler.Consent},
 		{"GET", "/connections", aegisHandler.GetConnections},
 		{"GET", "/context", aegisHandler.GetContext},
 		{"POST", "/login", aegisHandler.Login},
