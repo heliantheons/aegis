@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 
 	aegisguard "github.com/heliantheon/aegis-go/guard"
 	pkgtoken "github.com/heliantheon/aegis-go/utilities/token"
@@ -25,6 +26,7 @@ import (
 	"github.com/heliantheon/aegis/internal/token"
 	"github.com/heliantheon/aegis/internal/types"
 	"github.com/heliantheon/aegis/internal/user"
+	"github.com/heliantheon/aegis/middleware"
 	"github.com/heliantheon/aegis/models"
 	"github.com/heliantheon/aegis/profile"
 	"github.com/heliantheon/common/async"
@@ -67,11 +69,6 @@ func NewHandler(
 		profileHandler:  profileHandler,
 		pool:            pool,
 	}
-}
-
-// CacheManager 返回缓存管理器（用于 CORS 中间件等）
-func (h *Handler) CacheManager() *cache.Manager {
-	return h.cache
 }
 
 // Profile 返回用户信息处理器
@@ -340,10 +337,6 @@ func (h *Handler) IDPs(c *gin.Context) {
 	var req IDPInitiateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
-		return
-	}
-	if err := validateIDPOrigin(c.GetHeader("Origin")); err != nil {
-		h.errorResponse(c, autherrors.NewInvalidRequest("untrusted idp request origin"))
 		return
 	}
 
@@ -793,6 +786,21 @@ func (h *Handler) Revoke(c *gin.Context) {
 	if err := c.ShouldBind(&req); err != nil {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
+	}
+
+	if c.GetHeader("Origin") != "" {
+		refreshToken, err := h.cache.GetRefreshToken(c.Request.Context(), req.Token)
+		if err != nil {
+			c.Status(http.StatusOK)
+			return
+		}
+		if req.ClientID != "" && req.ClientID != refreshToken.ClientID {
+			h.errorResponse(c, autherrors.NewInvalidRequest("client_id mismatch"))
+			return
+		}
+		if !h.allowClientOrigin(c, refreshToken.ClientID) {
+			return
+		}
 	}
 
 	// RFC 7009: 即使 token 无效，也应返回 200
@@ -1514,7 +1522,7 @@ func challengeOptions(ch *types.Challenge) any {
 // tokenForm form 请求：authorization_code 单/多由 flow 决定，refresh_token 走单 audience
 func (h *Handler) tokenForm(c *gin.Context) {
 	var req authorize.TokenRequest
-	if err := c.ShouldBind(&req); err != nil {
+	if err := c.ShouldBindWith(&req, binding.FormPost); err != nil {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
@@ -1523,9 +1531,13 @@ func (h *Handler) tokenForm(c *gin.Context) {
 		h.tokenErrorResponse(c, err)
 		return
 	}
-	req.ClientID, err = h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, authentication)
+	app, err := h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, authentication)
 	if err != nil {
 		h.tokenErrorResponse(c, err)
+		return
+	}
+	req.ClientID = app.AppID
+	if c.GetHeader("Origin") != "" && !middleware.AllowOrigin(c, app.GetAllowedOrigins()) {
 		return
 	}
 	logger.Infof("[Token] 进入 token 交换 - grant_type: %s, client_id: %s", req.GrantType, req.ClientID)
@@ -1565,9 +1577,13 @@ func (h *Handler) tokenMultiAudience(c *gin.Context) {
 		h.tokenErrorResponse(c, err)
 		return
 	}
-	req.ClientID, err = h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, authentication)
+	app, err := h.authorizeSvc.AuthenticateClient(c.Request.Context(), req.ClientID, authentication)
 	if err != nil {
 		h.tokenErrorResponse(c, err)
+		return
+	}
+	req.ClientID = app.AppID
+	if c.GetHeader("Origin") != "" && !middleware.AllowOrigin(c, app.GetAllowedOrigins()) {
 		return
 	}
 
@@ -1585,6 +1601,21 @@ func (h *Handler) tokenMultiAudience(c *gin.Context) {
 }
 
 // --- 共享私有方法 ---
+
+// allowClientOrigin applies browser policy only after the caller has confirmed token ownership.
+func (h *Handler) allowClientOrigin(c *gin.Context, clientID string) bool {
+	if c.GetHeader("Origin") == "" {
+		return true
+	}
+	if clientID == "" {
+		return middleware.AllowOrigin(c, nil)
+	}
+	app, err := h.cache.GetApplication(c.Request.Context(), clientID)
+	if err != nil {
+		return middleware.AllowOrigin(c, nil)
+	}
+	return middleware.AllowOrigin(c, app.GetAllowedOrigins())
+}
 
 // authorizeAndGenerateCode 准备授权并生成授权码
 // 调用前需确保 flow 已通过 resolveUser 设置好 User 和 Identities
@@ -1909,24 +1940,6 @@ func oauthAuthorizationQueryMatches(query url.Values, transaction *idp.OAuthTran
 		query.Get("code_challenge_method") == "S256" &&
 		query.Get("response_type") == "code" &&
 		query.Get("client_id") != ""
-}
-
-// validateIDPOrigin rejects browser-triggered login CSRF. Non-browser clients
-// may omit Origin; browsers cannot forge it. Pallas is served from the Aegis
-// origin, so no caller-provided redirect or origin is accepted here.
-func validateIDPOrigin(origin string) error {
-	if origin == "" {
-		return nil
-	}
-	requestOrigin, err := url.Parse(origin)
-	if err != nil || requestOrigin.Scheme == "" || requestOrigin.Host == "" || requestOrigin.Path != "" {
-		return errors.New("invalid origin")
-	}
-	trustedOrigin, err := url.Parse(config.GetEndpoint())
-	if err != nil || requestOrigin.Scheme != trustedOrigin.Scheme || requestOrigin.Host != trustedOrigin.Host {
-		return errors.New("origin is not trusted")
-	}
-	return nil
 }
 
 func oauthErrorURL(code string) string {

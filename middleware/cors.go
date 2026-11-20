@@ -1,133 +1,103 @@
 package middleware
 
 import (
-	"bytes"
-	"io"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-json-experiment/json"
-
-	"github.com/heliantheon/aegis/config"
-	"github.com/heliantheon/aegis/internal/cache"
-	"github.com/heliantheon/common/logger"
 )
 
 const (
 	wildcard             = "*"
 	defaultAllowMethods  = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
 	defaultAllowHeaders  = "Content-Type, Authorization, X-Requested-With, traceparent, tracestate, baggage"
-	defaultExposeHeaders = "Location, X-Trace-ID"
+	defaultExposeHeaders = "Location, WWW-Authenticate, X-Trace-ID"
 	defaultMaxAge        = "86400"
-
-	headerOrigin           = "Origin"
-	headerAllowOrigin      = "Access-Control-Allow-Origin"
-	headerAllowMethods     = "Access-Control-Allow-Methods"
-	headerAllowHeaders     = "Access-Control-Allow-Headers"
-	headerExposeHeaders    = "Access-Control-Expose-Headers"
-	headerAllowCredentials = "Access-Control-Allow-Credentials"
-	headerMaxAge           = "Access-Control-Max-Age"
 )
 
-// CORS 创建 CORS 中间件
-// 优先检查配置文件的 origins（pallas 无条件放行），然后检查应用的 allowed_origins
-func CORS(cacheManager *cache.Manager) gin.HandlerFunc {
-	origins := config.GetCORSOrigins()
+// OriginResolver 返回允许写入响应的 Origin，空字符串表示不开放跨域读取。
+type OriginResolver func(string) string
 
+// CORSOptions 按来源、凭证和方法组合跨域行为，与认证协议无关。
+type CORSOptions struct {
+	ResolveOrigin    OriginResolver
+	AllowCredentials bool
+	AllowMethods     []string // 仅用于预检响应。
+}
+
+// AnyOrigin 允许任意来源读取不携带凭证的响应。
+func AnyOrigin(_ string) string { return wildcard }
+
+// CORS 校验实际请求的来源并设置跨域响应头。
+func CORS(options CORSOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		origin := c.GetHeader(headerOrigin)
-
-		c.Header(headerAllowMethods, defaultAllowMethods)
-		c.Header(headerAllowHeaders, defaultAllowHeaders)
-		c.Header(headerExposeHeaders, defaultExposeHeaders)
-		c.Header(headerAllowCredentials, "true")
-		c.Header(headerMaxAge, defaultMaxAge)
-		c.Header("Vary", "Origin")
-
-		if c.Request.Method == "OPTIONS" {
-			if origin != "" {
-				c.Header(headerAllowOrigin, origin)
-			}
-			c.AbortWithStatus(204)
+		if origin := c.GetHeader("Origin"); origin != "" && !setCORSHeaders(c, &options, origin) {
+			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
-
-		setAllowOrigin(c, origins, cacheManager, origin)
 		c.Next()
 	}
 }
 
-// setAllowOrigin 设置允许的 Origin（配置文件 + 应用配置）
-func setAllowOrigin(c *gin.Context, origins []string, cacheManager *cache.Manager, origin string) {
-	if origin == "" {
-		return
+// Preflight 处理完整的 CORS 预检；其他请求继续交给后续中间件。
+func Preflight(options CORSOptions) gin.HandlerFunc {
+	methods := defaultAllowMethods
+	if len(options.AllowMethods) > 0 {
+		methods = strings.Join(options.AllowMethods, ", ")
 	}
-
-	if isOriginAllowed(origin, origins) {
-		c.Header(headerAllowOrigin, origin)
-		return
-	}
-
-	clientID := getClientID(c, "client_id")
-	if clientID != "" && cacheManager != nil {
-		if validateAppOrigin(c, cacheManager, clientID, origin) {
-			c.Header(headerAllowOrigin, origin)
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if c.Request.Method != http.MethodOptions || origin == "" || c.GetHeader("Access-Control-Request-Method") == "" {
+			c.Next()
+			return
 		}
+		if !setCORSHeaders(c, &options, origin) {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		c.Header("Access-Control-Allow-Methods", methods)
+		c.Header("Access-Control-Allow-Headers", defaultAllowHeaders)
+		c.Header("Access-Control-Max-Age", defaultMaxAge)
+		c.AbortWithStatus(http.StatusNoContent)
 	}
 }
 
-// validateAppOrigin 验证请求来源是否在应用的允许列表中
-func validateAppOrigin(c *gin.Context, cm *cache.Manager, clientID, origin string) bool {
-	app, err := cm.GetApplication(c.Request.Context(), clientID)
-	if err != nil {
+func setCORSHeaders(c *gin.Context, options *CORSOptions, origin string) bool {
+	allowedOrigin := ""
+	if options.ResolveOrigin != nil {
+		allowedOrigin = options.ResolveOrigin(origin)
+	}
+	if allowedOrigin != wildcard || options.AllowCredentials {
+		c.Writer.Header().Add("Vary", "Origin")
+	}
+	if allowedOrigin == "" || (options.AllowCredentials && (allowedOrigin == wildcard || normalizeOrigin(origin) == "")) {
 		return false
 	}
-
-	allowedOrigins := app.GetAllowedOrigins()
-	if len(allowedOrigins) == 0 {
-		return true
+	c.Header("Access-Control-Allow-Origin", allowedOrigin)
+	c.Header("Access-Control-Expose-Headers", defaultExposeHeaders)
+	if options.AllowCredentials {
+		c.Header("Access-Control-Allow-Credentials", "true")
 	}
-
-	return isOriginAllowed(origin, allowedOrigins)
+	return true
 }
 
-// getClientID 从请求中获取 client_id（query -> form -> JSON body）
-// JSON body 使用 peek 方式读取后还原，不影响下游 handler
-func getClientID(c *gin.Context, paramName string) string {
-	if clientID := c.Query(paramName); clientID != "" {
-		return clientID
+// AllowOrigin applies the verified client's noncredentialed actual-response policy.
+func AllowOrigin(c *gin.Context, origins []string) bool {
+	origin := c.GetHeader("Origin")
+	if origin == "" {
+		return true
 	}
-
-	if clientID := c.PostForm(paramName); clientID != "" {
-		return clientID
-	}
-
-	if c.Request.Body != nil && c.ContentType() == "application/json" {
-		bodyBytes, err := io.ReadAll(c.Request.Body)
-		if err := c.Request.Body.Close(); err != nil {
-			logger.Warnf("failed to close request body: %v", err)
-		}
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		if err == nil && len(bodyBytes) > 0 {
-			var body map[string]any
-			if json.Unmarshal(bodyBytes, &body) == nil {
-				if clientID, ok := body[paramName].(string); ok && clientID != "" {
-					return clientID
-				}
+	c.Writer.Header().Add("Vary", "Origin")
+	normalized := normalizeOrigin(origin)
+	if normalized != "" {
+		for _, allowed := range origins {
+			if allowed == wildcard || allowed == normalized || normalizeOrigin(allowed) == normalized {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Expose-Headers", defaultExposeHeaders)
+				return true
 			}
 		}
 	}
-
-	return ""
-}
-
-// isOriginAllowed 检查 origin 是否在允许列表中
-func isOriginAllowed(origin string, origins []string) bool {
-	normalized := strings.TrimRight(origin, "/")
-	for _, o := range origins {
-		if o == wildcard || strings.TrimRight(o, "/") == normalized {
-			return true
-		}
-	}
+	c.AbortWithStatus(http.StatusForbidden)
 	return false
 }

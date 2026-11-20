@@ -415,3 +415,13 @@ d. 匹配成功 → ParseV4Public 验签
 ```
 
 > 显式令牌种类优先于 SSO 的启发式判断。`token_type` 与 Challenge 的业务 `typ` 相互独立；签发方和消费方使用 Aegis Go SDK `v0.0.2`，并重新签发不带类型标识的旧 SAT。
+
+## HTTP 请求与响应边界
+
+跨域、缓存和导航隐私按行为组合，复用独立中间件；现有 PASETO 凭证格式保持不变。
+
+- 服务仅提供一份 `cors.origins`，用于显式信任可调用登录会话、context、connections、idps、login、binding、challenge、logout 等接口的前端；Aegis endpoint 始终包含在可信来源中，额外列表可为空。环境覆盖名为 `AEGIS_CORS_ORIGINS`，列表使用空格分隔。可信 origin 必须是无路径、查询、用户信息的完整 HTTP(S) origin，不允许 `*` 或 `null`。应用 `allowed_origins` 独立控制 token、revoke 及后续 UserInfo 等客户端协议操作，不授予登录 API 访问权。
+- profile、identities、mfa 等账号业务接口不挂载 CORS，也不提供跨域预检；前端通过业务服务自己的同源地址访问，例如 Iris 的相对路径 `/api`。接口保留现有 Iris Bearer guard、用户归属校验与 NoStore；服务端调用仍按业务凭证和权限处理，不新增来源白名单。授权入口保留现有 `POST /api/authorize`，HTTP 中间件重构不迁移业务路由。
+- `middleware.Preflight` 和 `middleware.CORS` 是独立中间件：前者只处理同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的完整预检，后者只校验实际请求的来源并生成响应头。静态来源场景在路由上按 `Preflight(options)`、`CORS(options)` 顺序组合；不使用模式布尔值。token/revoke 只挂载通用 POST 预检，实际请求在验证客户端后调用 `AllowOrigin` 检查应用策略，拒绝来源返回 403。跨域中间件不解析请求体、`client_id` 或应用缓存；允许响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
+- 元数据和公钥是公开信息；`/api/pubkeys` 保留任意来源读取及公共缓存，不开放跨域凭证。`middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和 `Pragma: no-cache`，覆盖认证会话、账户管理、token、撤销和 Bearer 权限检查的成功、错误及跳转响应。`middleware.NoReferrer` 用于授权入口及上游身份提供方回调。
+- `middleware.ProtectCookieRequests` 保护登录组 Cookie 状态变更接口。明确受信任 Origin 即使携带 `Sec-Fetch-Site: cross-site` 也允许；不可信 Origin 即使标为 same-site/same-origin 也拒绝。Origin 缺省时保留同源 Fetch Metadata 或可信 Referer 回退；缺少来源依据返回 403。GET、HEAD 和 OPTIONS 沿用路由行为。token 交换、显式 token 撤销和 Bearer 管理接口不挂载此防护；上游回调继续使用现有交易校验。

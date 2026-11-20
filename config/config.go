@@ -62,10 +62,13 @@ func Validate() error {
 	if len(Cfg().GetStringSlice("mfa.webauthn.rp-origins")) == 0 {
 		errs = append(errs, fmt.Errorf("必需配置 mfa.webauthn.rp-origins 未设置"))
 	}
-	for _, key := range []string{"cors.origins", "identity.consumer-idps", "identity.platform-idps"} {
+	for _, key := range []string{"identity.consumer-idps", "identity.platform-idps"} {
 		if len(Cfg().GetStringSlice(key)) == 0 {
 			errs = append(errs, fmt.Errorf("必需配置 %s 未设置", key))
 		}
+	}
+	if err := validateHTTPOrigins(); err != nil {
+		errs = append(errs, err)
 	}
 	if _, err := GetSSOMasterKeys(); err != nil {
 		errs = append(errs, err)
@@ -92,9 +95,29 @@ func GetIssuer() string {
 	return GetEndpoint() + "/api"
 }
 
-// GetCORSOrigins 获取静态 CORS 允许的 origin 列表
+// GetCORSOrigins 返回服务自身及显式允许的登录前端来源。
 func GetCORSOrigins() []string {
-	return Cfg().GetStringSlice("cors.origins")
+	extras := Cfg().GetStringSlice("cors.origins")
+	origins := make([]string, 1, len(extras)+1)
+	origins[0] = GetEndpoint()
+	return append(origins, extras...)
+}
+
+func validateHTTPOrigins() error {
+	var errs []error
+	for _, key := range []string{"aegis.endpoint", "cors.origins"} {
+		origins := Cfg().GetStringSlice(key)
+		if key == "aegis.endpoint" {
+			origins = []string{GetEndpoint()}
+		}
+		for _, origin := range origins {
+			u, err := url.Parse(origin)
+			if err != nil || u == nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.Host == "" || u.User != nil || u.Opaque != "" || u.Path != "" || strings.ContainsAny(origin, "?#") || strings.Contains(u.Host, "*") {
+				errs = append(errs, fmt.Errorf("配置 %s 包含无效可信 origin %q", key, origin))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // ==================== Cookie 配置 ====================
