@@ -3,8 +3,6 @@ package auth
 import (
 	"fmt"
 	"strings"
-
-	"github.com/heliantheon/aegis/internal/types"
 )
 
 // LoginRequest 登录请求
@@ -133,8 +131,7 @@ type ServiceInfo struct {
 
 // AuthContextBase 单、多 audience 认证上下文共享的信息。
 type AuthContextBase struct {
-	Application *ApplicationInfo   `json:"application,omitempty"`
-	Request     *types.AuthRequest `json:"request,omitempty"`
+	Application *ApplicationInfo `json:"application,omitempty"`
 }
 
 // SingleAudienceContext 单 audience 认证上下文。

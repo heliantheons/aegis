@@ -92,6 +92,9 @@ func TestBuildAuthContextPreservesAudienceShape(t *testing.T) {
 			if err := json.Unmarshal(encoded, &fields); err != nil {
 				t.Fatalf("unmarshal context: %v", err)
 			}
+			if _, exposed := fields["request"]; exposed {
+				t.Fatalf("context exposes authorization request: %s", encoded)
+			}
 			_, hasService := fields["service"]
 			_, hasServices := fields["services"]
 			if hasService != test.wantService || hasServices != test.wantServices {

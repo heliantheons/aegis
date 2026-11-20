@@ -1043,7 +1043,7 @@ func (h *Handler) validateAudiences(ctx context.Context, clientID string, audien
 }
 
 func buildAuthContext(flow *types.AuthFlow) any {
-	base := AuthContextBase{Request: flow.Request}
+	base := AuthContextBase{}
 	if flow.Application != nil {
 		base.Application = &ApplicationInfo{
 			DomainID:    flow.Application.DomainID,
