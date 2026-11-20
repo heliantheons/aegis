@@ -147,8 +147,8 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, corsOp
 	protocol.OPTIONS("/revoke")
 
 	sessions := api.Group("", middleware.Preflight(corsOptions), middleware.CORS(corsOptions), middleware.NoStore, cookieProtection)
-	sessions.POST("/auth/sessions", middleware.NoReferrer, aegisHandler.Authorize)
-	sessions.OPTIONS("/auth/sessions")
+	sessions.POST("/authorize", middleware.NoReferrer, aegisHandler.Authorize)
+	sessions.OPTIONS("/authorize")
 	authRoutes := []struct {
 		method, path string
 		handler      gin.HandlerFunc

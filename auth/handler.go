@@ -108,7 +108,7 @@ func GetClientClaims(c *gin.Context) *pkgtoken.ClientToken {
 
 // --- 认证会话 ---
 
-// Authorize POST /api/auth/sessions
+// Authorize POST /api/authorize
 // 创建认证会话
 func (h *Handler) Authorize(c *gin.Context) {
 	var req types.AuthRequest
