@@ -1005,21 +1005,6 @@ func validateAuthorizeRequest(req *types.AuthRequest) *autherrors.AuthError {
 	return nil
 }
 
-func validateAuthorizationPrompt(prompts []string) *autherrors.AuthError {
-	for i, prompt := range prompts {
-		if slices.Contains(prompts[:i], prompt) {
-			return autherrors.NewInvalidRequest("prompt values must not repeat")
-		}
-		if prompt != types.PromptNone && prompt != types.PromptLogin && prompt != types.PromptConsent {
-			return autherrors.NewInvalidRequest("unsupported prompt")
-		}
-	}
-	if slices.Contains(prompts, types.PromptNone) && len(prompts) != 1 {
-		return autherrors.NewInvalidRequest("prompt none cannot be combined with other values")
-	}
-	return nil
-}
-
 func collectAudiences(req *types.AuthRequest) ([]string, *autherrors.AuthError) {
 	if req.Audience != "" {
 		return []string{req.Audience}, nil

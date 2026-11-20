@@ -426,33 +426,6 @@ func TestAuthorizationNavigationPreservesPostAction(t *testing.T) {
 	}
 }
 
-func TestSSOAuthenticationAge(t *testing.T) {
-	t.Parallel()
-	now := time.Unix(1700000100, 0)
-	zero, ten := uint64(0), uint64(10)
-	for _, tt := range []struct {
-		name            string
-		authenticatedAt time.Time
-		maxAge          *uint64
-		want            bool
-	}{
-		{"legacy session without max age", time.Time{}, nil, true},
-		{"legacy session with max age", time.Time{}, &ten, false},
-		{"fresh session", now.Add(-time.Second), &ten, true},
-		{"exact age", now.Add(-10 * time.Second), &ten, true},
-		{"expired authentication", now.Add(-11 * time.Second), &ten, false},
-		{"zero always reauthenticates", now, &zero, false},
-		{"future authentication", now.Add(time.Second), nil, false},
-		{"no maximum age", now.Add(-time.Hour), nil, true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := ssoAuthenticationFresh(tt.authenticatedAt, tt.maxAge, now); got != tt.want {
-				t.Fatalf("ssoAuthenticationFresh() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func buildUserInfoToken(t *testing.T, issuer, audience, scope, openID string, lifetime time.Duration) *pkgtoken.UserAccessToken {
 	t.Helper()
 	built := pkgtoken.NewClaimsBuilder().Issuer(issuer).ClientID("atlas").Audience(audience).ExpiresIn(lifetime).
@@ -595,19 +568,6 @@ func TestSSORenewalPreservesOriginalDomainAuthenticationTimes(t *testing.T) {
 	want := map[string]string{"platform": "1700000099", "consumer": "1700000010"}
 	if got := redis.hashes[ssoAuthTimeKey("reauthenticated")]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("reauthentication auth times = %v, want %v", got, want)
-	}
-}
-
-func TestConsentRequiresExplicitDecision(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/consent", strings.NewReader(`{}`))
-	request.Header.Set("Content-Type", gin.MIMEJSON)
-	router := gin.New()
-	router.POST("/api/consent", (&Handler{}).Consent)
-	router.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("consent without decision status = %d", recorder.Code)
 	}
 }
 

@@ -457,6 +457,8 @@ UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确
 
 内部 Pallas 的 XHR 登录/MFA 操作继续使用 HTTP 300 与 `Location` 指令；浏览器顶层授权入口使用正常 HTTP 跳转。重定向 URI 精确匹配注册值，授权错误仅回到已验证的客户端 URI。`prompt`、`max_age` 与实际认证时间共同决定是否允许 SSO 复用。
 
+`prompt` 校验、重新认证/SSO 判断和同意交互集中在现有 `auth` 包的 `prompt.go`；Redis 同意记录仍由 `internal/cache` 读写。用户同意只表示允许释放所请求的信息，不替代服务端授权：Aegis 校验应用与资源关系，并按服务端支持范围计算实际授予的身份 scope；资源 API 还需校验 Token 和自身业务权限。当前身份 scope 的允许列表是固定标准集合，尚未实现按应用或服务配置的细粒度 scope 白名单。
+
 GET/POST 共用同一套登录与同意判断，HTTP method 只影响参数来源和响应交付。`prompt=none` 禁止交互：无有效会话返回 `login_required`，缺少所需同意返回 `consent_required`，满足登录和授权条件时直接签发授权码。`prompt=login` 或 `max_age=0` 要求重新认证；`prompt=consent` 要求本次明确同意，无 SSO 时先完成登录。`none` 不能与其他 prompt 值组合。
 
 用户同意按域、用户、应用绑定，并分别记录身份声明 scope 和各 audience 的 scope，保存在现有 Redis 中，保留时间采用 SSO TTL。同意提交原子合并范围并设置过期时间；后续相同或更小范围可复用，新增 scope 或资源需要重新确认。缓存故障不视为已经同意；拒绝本次请求不签发授权码，也不扩大已有同意。未请求 OIDC 且未显式要求 consent 的原有 OAuth 流程保持原授权策略。
