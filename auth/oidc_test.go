@@ -44,49 +44,85 @@ func authorizeQueryContext(query url.Values) *gin.Context {
 	return c
 }
 
-func TestBindAuthorizeQuery(t *testing.T) {
+func TestBindAuthorizeParameters(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tt := range []struct {
 		name    string
 		change  func(url.Values)
+		maxAge  uint64
 		wantErr bool
 	}{
 		{name: "standard request with optional resource"},
+		{name: "space delimited parameters", change: func(q url.Values) {
+			q.Set("scope", "  openid\tprofile\nemail ")
+			q.Set("prompt", " login \tconsent ")
+		}},
 		{name: "multi audience extension", change: func(q url.Values) {
 			q.Set("audiences", `{"iris":{"scope":"openid profile"},"hermes":{"scope":"read"}}`)
 		}},
 		{name: "explicit zero max age", change: func(q url.Values) { q.Set("max_age", "0") }},
+		{name: "positive max age", change: func(q url.Values) { q.Set("max_age", "3600") }, maxAge: 3600},
 		{name: "repeated state", change: func(q url.Values) { q.Add("state", "attacker") }, wantErr: true},
 		{name: "repeated redirect", change: func(q url.Values) { q.Add("redirect_uri", "https://evil.example") }, wantErr: true},
 		{name: "negative max age", change: func(q url.Values) { q.Set("max_age", "-1") }, wantErr: true},
 		{name: "fractional max age", change: func(q url.Values) { q.Set("max_age", "0.1") }, wantErr: true},
 		{name: "empty max age", change: func(q url.Values) { q.Set("max_age", "") }, wantErr: true},
+		{name: "padded max age", change: func(q url.Values) { q.Set("max_age", " 1 ") }, wantErr: true},
+		{name: "whitespace max age", change: func(q url.Values) { q.Set("max_age", " ") }, wantErr: true},
+		{name: "positive sign max age", change: func(q url.Values) { q.Set("max_age", "+1") }, wantErr: true},
+		{name: "overflow max age", change: func(q url.Values) { q.Set("max_age", "18446744073709551616") }, wantErr: true},
 		{name: "invalid audience object", change: func(q url.Values) { q.Set("audiences", `[]`) }, wantErr: true},
+		{name: "empty audience object", change: func(q url.Values) { q.Set("audiences", `{}`) }, wantErr: true},
+		{name: "null audience object", change: func(q url.Values) { q.Set("audiences", `null`) }, wantErr: true},
 		{name: "fragment response mode", change: func(q url.Values) { q.Set("response_mode", "fragment") }, wantErr: true},
 	} {
-		t.Run(tt.name, func(t *testing.T) {
-			q := standardAuthorizationQuery()
-			if tt.change != nil {
-				tt.change(q)
-			}
-			var req types.AuthRequest
-			_, err := bindAuthorizeQuery(authorizeQueryContext(q), &req)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("bindAuthorizeQuery() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err != nil {
-				return
-			}
-			if req.ClientID != "atlas" || req.State != q.Get("state") || !req.Scope.Contains("openid") || req.Nonce != "nonce" {
-				t.Fatalf("bound standard request = %+v", req)
-			}
-			if q.Has("max_age") && (req.MaxAge == nil || *req.MaxAge != 0) {
-				t.Fatalf("max_age = %v, want explicit zero", req.MaxAge)
-			}
-			if q.Has("audiences") && req.Audiences["iris"].Scope != "openid profile" {
-				t.Fatalf("audiences = %+v", req.Audiences)
-			}
-		})
+		for _, source := range []string{"query", "form"} {
+			t.Run(tt.name+"/"+source, func(t *testing.T) {
+				q := standardAuthorizationQuery()
+				q.Set("prompt", "login consent")
+				q.Set("login_hint", "user@example.com")
+				if tt.change != nil {
+					tt.change(q)
+				}
+				var req types.AuthRequest
+				var err error
+				if source == "query" {
+					_, err = bindAuthorizeQuery(authorizeQueryContext(q), &req)
+				} else {
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/authorize?client_id=attacker&redirect_uri=https://evil.example", strings.NewReader(q.Encode()))
+					c.Request.Header.Set("Content-Type", gin.MIMEPOSTForm)
+					err = bindAuthorizeBody(c, &req)
+				}
+				if (err != nil) != tt.wantErr {
+					t.Fatalf("authorization binding error = %v, wantErr %v", err, tt.wantErr)
+				}
+				if err != nil {
+					return
+				}
+				want := types.AuthorizeRequestBase{
+					ResponseType:        "code",
+					ClientID:            "atlas",
+					RedirectURI:         "https://atlas.example/callback?tenant=one",
+					CodeChallenge:       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+					CodeChallengeMethod: "S256",
+					State:               "state + / ?",
+					Scope:               []string{"openid", "profile", "email"},
+					Prompt:              []string{"login", "consent"},
+					Nonce:               "nonce",
+					LoginHint:           "user@example.com",
+				}
+				if q.Has("max_age") {
+					want.MaxAge = &tt.maxAge
+				}
+				if !reflect.DeepEqual(req.AuthorizeRequestBase, want) {
+					t.Fatalf("bound standard request = %+v, want %+v", req.AuthorizeRequestBase, want)
+				}
+				if audience := req.Audiences["iris"]; q.Has("audiences") && (audience == nil || audience.Scope != "openid profile") {
+					t.Fatalf("audiences = %+v", req.Audiences)
+				}
+			})
+		}
 	}
 }
 

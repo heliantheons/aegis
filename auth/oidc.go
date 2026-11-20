@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -156,13 +155,11 @@ func bindAuthorizeBody(c *gin.Context, req *types.AuthRequest) error {
 }
 
 func bindAuthorizeParameters(query url.Values, req *types.AuthRequest) error {
-	req.ClientID = query.Get("client_id")
-	req.RedirectURI = query.Get("redirect_uri")
-	req.State = query.Get("state")
 	if len(query["client_id"]) != 1 || len(query["redirect_uri"]) != 1 {
 		req.RedirectURI = ""
 		return autherrors.NewInvalidRequest("client_id and redirect_uri must occur exactly once")
 	}
+	bindErr := binding.MapFormWithTag(req, query, "form")
 	for _, values := range query {
 		if len(values) != 1 {
 			return autherrors.NewInvalidRequest("authorization parameters must not repeat")
@@ -171,29 +168,14 @@ func bindAuthorizeParameters(query url.Values, req *types.AuthRequest) error {
 	if mode := query.Get("response_mode"); mode != "" && mode != "query" {
 		return autherrors.NewInvalidRequest("only query response_mode is supported")
 	}
-	req.ResponseType = query.Get("response_type")
-	req.CodeChallenge = query.Get("code_challenge")
-	req.CodeChallengeMethod = query.Get("code_challenge_method")
-	req.Scope = strings.Fields(query.Get("scope"))
-	req.Prompt = strings.Fields(query.Get("prompt"))
-	req.Nonce = query.Get("nonce")
-	req.LoginHint = query.Get("login_hint")
-	req.Audience = query.Get("audience")
-	return bindAuthorizeExtensions(query, req)
-}
-
-func bindAuthorizeExtensions(query url.Values, req *types.AuthRequest) error {
-	if values, ok := query["max_age"]; ok {
-		age, err := strconv.ParseUint(values[0], 10, 64)
-		if err != nil || values[0] == "" || strings.HasPrefix(values[0], "+") {
-			return autherrors.NewInvalidRequest("max_age must be a nonnegative integer")
-		}
-		req.MaxAge = &age
+	if age, ok := query["max_age"]; ok && (age[0] == "" || age[0] != strings.TrimSpace(age[0])) {
+		return autherrors.NewInvalidRequest("max_age must be a nonnegative integer")
 	}
-	if audiences, ok := query["audiences"]; ok {
-		if err := json.Unmarshal([]byte(audiences[0]), &req.Audiences); err != nil || len(req.Audiences) == 0 {
-			return autherrors.NewInvalidRequest("audiences must be a nonempty JSON object")
-		}
+	if bindErr != nil {
+		return autherrors.NewInvalidRequest(bindErr.Error())
+	}
+	if query.Has("audiences") && len(req.Audiences) == 0 {
+		return autherrors.NewInvalidRequest("audiences must be a nonempty JSON object")
 	}
 	return nil
 }

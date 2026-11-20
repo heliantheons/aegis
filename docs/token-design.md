@@ -452,6 +452,8 @@ UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确
 
 路由独立选择参数来源（`QueryParameters` / `BodyParameters`）及响应方式（`BrowserResponse` / `ActionResponse`），共享同一授权核心，不根据 HTTP method 推断。标准 GET 授权入口选择 query/browser，标准 POST 授权入口选择 body/browser，均使用 `/api/authorize` 路径。浏览器错误跳转前仍需验证注册的 client 与 redirect URI。
 
+授权参数复用 `AuthRequest` 的 form 标签进行绑定，`scope` 和 `prompt` 通过现有 `SpaceDelimited.UnmarshalText` 解析，`audiences` 通过 JSON 对象绑定；不另行维护字段映射。OIDC 层额外检查参数唯一性、严格的 `max_age` 格式、支持的 `response_mode` 和非空 `audiences`，query 与 body 的参数来源保持隔离。
+
 内部 Pallas 的 XHR 登录/MFA 操作继续使用 HTTP 300 与 `Location` 指令；浏览器顶层授权入口使用正常 HTTP 跳转。重定向 URI 精确匹配注册值，授权错误仅回到已验证的客户端 URI。`prompt`、`max_age` 与实际认证时间共同决定是否允许 SSO 复用。
 
 当前没有持久化历史授权记录，每次 `openid` 登录均要求用户明确同意；有效 SSO 会话配合 `prompt=none` 时返回 `consent_required`。SSO 的原始认证时间保存在独立 Redis 元数据中，续期不重置认证时间，也不修改 SSO Token 的格式；元数据缺失或不满足 `max_age` 时重新认证。
