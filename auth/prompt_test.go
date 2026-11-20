@@ -371,7 +371,7 @@ func TestAuthorizePromptAndSSOConsentDecisions(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if location.Path != want.Path {
+					if location.String() != want.String() {
 						t.Fatalf("consent location = %q", location)
 					}
 				} else if tt.sso && tt.prompt != "login" {
@@ -383,7 +383,7 @@ func TestAuthorizePromptAndSSOConsentDecisions(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if location.Path != want.Path {
+					if location.String() != want.String() {
 						t.Fatalf("login location = %q", location)
 					}
 				}

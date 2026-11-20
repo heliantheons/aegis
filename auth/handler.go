@@ -1045,7 +1045,7 @@ func (h *Handler) validateAudiences(ctx context.Context, clientID string, audien
 }
 
 func buildAuthContext(flow *types.AuthFlow) any {
-	base := AuthContextBase{}
+	base := AuthContextBase{AuthorizationURL: flow.AuthorizationURL}
 	if flow.Application != nil {
 		base.Application = &ApplicationInfo{
 			DomainID:    flow.Application.DomainID,
@@ -1929,7 +1929,7 @@ func forwardNext(c *gin.Context, flow *types.AuthFlow, navigate func(*gin.Contex
 		targetURL = config.GetEndpointLogin()
 	}
 
-	navigate(c, withAuthorizationURL(targetURL, flow.AuthorizationURL))
+	navigate(c, targetURL)
 }
 
 // actionRedirect 发送 HTTP 300 Multiple Choices 指令式重定向

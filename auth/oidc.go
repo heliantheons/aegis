@@ -234,20 +234,6 @@ func authorizationError(c *gin.Context, validated *types.AuthRequest, err error)
 	browserRedirect(c, authorizationErrorURL(validated.RedirectURI, validated.State, authErr.Code, authErr.Description))
 }
 
-func withAuthorizationURL(target, authorizationURL string) string {
-	if authorizationURL == "" {
-		return target
-	}
-	u, err := url.Parse(target)
-	if err != nil {
-		return target
-	}
-	query := u.Query()
-	query.Set("authorize_url", authorizationURL)
-	u.RawQuery = query.Encode()
-	return u.String()
-}
-
 func ssoAuthTimeKey(raw string) string {
 	return fmt.Sprintf("aegis:oidc:sso-auth-time:%x", sha256.Sum256([]byte(raw)))
 }

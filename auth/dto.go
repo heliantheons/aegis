@@ -131,7 +131,8 @@ type ServiceInfo struct {
 
 // AuthContextBase 单、多 audience 认证上下文共享的信息。
 type AuthContextBase struct {
-	Application *ApplicationInfo `json:"application,omitempty"`
+	Application      *ApplicationInfo `json:"application,omitempty"`
+	AuthorizationURL string           `json:"authorization_url,omitempty"`
 }
 
 // SingleAudienceContext 单 audience 认证上下文。

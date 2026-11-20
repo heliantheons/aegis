@@ -101,7 +101,7 @@ func (h *Handler) requestConsent(c *gin.Context, ctx context.Context, flow *type
 	}
 	h.issueSSOCookie(c, ctx, flow)
 	setAuthSessionCookie(c, flow.ID)
-	navigate(c, withAuthorizationURL(config.GetEndpointConsent(), flow.AuthorizationURL))
+	navigate(c, config.GetEndpointConsent())
 	return true
 }
 

@@ -453,6 +453,8 @@ UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确
 
 `GET /api/authorize` 和 `POST /api/authorize` 统一挂载 `Authorize`。GET 只读取 query，正常导航使用浏览器跳转；授权错误仅在 client 与 redirect URI 通过注册校验后回跳。POST 只读取 body，保留 Pallas 的 API 契约：下一步通过 HTTP 300 + `Location` 交给前端执行，错误返回本地 JSON，不自动跟随浏览器重定向；绑定失败时不查询应用注册信息。
 
+GET 授权入口将原始授权请求 URL 保存在 AuthFlow 中，保留 nonce、state、PKCE、resource、多 audience 及扩展参数的原始编码；POST 流程不生成恢复 URL。现有 `GET /api/context` 的单 audience 和多 audience 响应均通过可选顶层字段 `authorization_url` 提供该 URL，未保存时省略。登录、同意及其他浏览器重定向不携带恢复 URL。Pallas 从成功的上下文响应中记住经过同源 `/api/authorize` 校验的 URL，用于流程过期后重新发起授权；若首次读取上下文时流程已经过期且没有已记住的请求，则保留现有过期或错误提示，无法从不存在的服务端状态重建请求。
+
 授权参数复用 `AuthRequest` 的 form 标签进行绑定，`scope` 和 `prompt` 通过现有 `SpaceDelimited.UnmarshalText` 解析，`audiences` 通过 JSON 对象绑定；不另行维护字段映射。OIDC 层额外检查参数唯一性、严格的 `max_age` 格式、支持的 `response_mode` 和非空 `audiences`，query 与 body 的参数来源保持隔离。
 
 内部 Pallas 的 XHR 登录/MFA 操作继续使用 HTTP 300 与 `Location` 指令；浏览器顶层授权入口使用正常 HTTP 跳转。重定向 URI 精确匹配注册值，授权错误仅回到已验证的客户端 URI。`prompt`、`max_age` 与实际认证时间共同决定是否允许 SSO 复用。
