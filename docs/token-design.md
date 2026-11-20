@@ -450,7 +450,7 @@ d. 匹配成功 → ParseV4Public 验签
 
 UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确认的 client_id 检查应用 `allowed_origins`；URL 查询参数不能选择其他客户端的来源策略。跨域预检不携带 Token，先执行通用预检，实际请求仍需通过完整的凭证、来源和 scope 校验。
 
-授权入口使用普通 Gin handler：`GET /api/authorize` 挂载 `AuthorizeGET`，只读取 query；`POST /api/authorize` 挂载 `Authorize`，只读取 body。两者将已绑定的请求交给共用授权流程，统一使用浏览器导航响应。浏览器错误跳转前仍需验证注册的 client 与 redirect URI。
+`GET /api/authorize` 和 `POST /api/authorize` 统一挂载 `Authorize`。入口在本方法内绑定参数：GET 只读取 query，POST 只读取 body，随后直接执行授权流程并使用浏览器导航响应。浏览器错误跳转前仍需验证注册的 client 与 redirect URI。
 
 授权参数复用 `AuthRequest` 的 form 标签进行绑定，`scope` 和 `prompt` 通过现有 `SpaceDelimited.UnmarshalText` 解析，`audiences` 通过 JSON 对象绑定；不另行维护字段映射。OIDC 层额外检查参数唯一性、严格的 `max_age` 格式、支持的 `response_mode` 和非空 `audiences`，query 与 body 的参数来源保持隔离。
 

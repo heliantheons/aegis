@@ -108,20 +108,72 @@ func GetClientClaims(c *gin.Context) *pkgtoken.ClientToken {
 
 // --- 认证会话 ---
 
-// Authorize POST /api/authorize
-// 从请求体绑定授权参数。
+// Authorize 处理 GET/POST /api/authorize。
 func (h *Handler) Authorize(c *gin.Context) {
-	var req types.AuthRequest
-	err := bindAuthorizeBody(c, &req)
-	h.authorize(c, &req, "", err)
-}
+	req := new(types.AuthRequest)
+	var authorizationURL string
+	var bindErr error
+	if c.Request.Method == http.MethodGet {
+		authorizationURL, bindErr = bindAuthorizeQuery(c, req)
+	} else {
+		bindErr = bindAuthorizeBody(c, req)
+	}
+	app := h.prepareAuthorizationEntry(c, req, bindErr)
+	if app == nil {
+		return
+	}
+	ctx := c.Request.Context()
 
-// AuthorizeGET GET /api/authorize
-// 从 query 绑定授权参数。
-func (h *Handler) AuthorizeGET(c *gin.Context) {
-	var req types.AuthRequest
-	authorizationURL, err := bindAuthorizeQuery(c, &req)
-	h.authorize(c, &req, authorizationURL, err)
+	audiences, authErr := collectAudiences(req)
+	if authErr != nil {
+		browserAuthorizationError(c, req, authErr)
+		return
+	}
+
+	services, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
+	if authErr != nil {
+		browserAuthorizationError(c, req, authErr)
+		return
+	}
+
+	idpConfigs, err := h.cache.ListApplicationIDPConfigs(ctx, req.ClientID)
+	if err != nil {
+		browserAuthorizationError(c, req, autherrors.NewServerError("query idp configs failed"))
+		return
+	}
+	if len(idpConfigs) == 0 {
+		browserAuthorizationError(c, req, autherrors.NewNoConnectionAvailable(""))
+		return
+	}
+
+	flow := types.NewAuthFlow(req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
+	flow.Application = app
+	flow.AuthorizationURL = authorizationURL
+	if len(req.Audiences) > 0 {
+		flow.Services = services
+	} else {
+		flow.Service = &services[0]
+	}
+	flow.SetConnectionMap(h.authenticateSvc.SetConnections(idpConfigs))
+
+	if !requiresFreshAuthentication(req) {
+		if redirected := h.trySSOFastPath(c, ctx, flow); redirected {
+			return
+		}
+	}
+
+	if req.Prompt.Contains(types.PromptNone) {
+		browserAuthorizationError(c, req, autherrors.NewLoginRequired("no active SSO session"))
+		return
+	}
+
+	if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
+		browserAuthorizationError(c, req, autherrors.NewServerError("save flow failed"))
+		return
+	}
+
+	setAuthSessionCookie(c, flow.ID)
+	forwardNext(c, flow, browserRedirect)
 }
 
 // --- 上下文查询 ---
@@ -894,64 +946,6 @@ func (h *Handler) revokeAndClearSSO(c *gin.Context, openID string) {
 
 // --- Authorize 引用链 ---
 
-func (h *Handler) authorize(c *gin.Context, req *types.AuthRequest, authorizationURL string, bindErr error) {
-	app := h.prepareAuthorizationEntry(c, req, bindErr)
-	if app == nil {
-		return
-	}
-	ctx := c.Request.Context()
-
-	audiences, authErr := collectAudiences(req)
-	if authErr != nil {
-		browserAuthorizationError(c, req, authErr)
-		return
-	}
-
-	services, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
-	if authErr != nil {
-		browserAuthorizationError(c, req, authErr)
-		return
-	}
-
-	idpConfigs, err := h.cache.ListApplicationIDPConfigs(ctx, req.ClientID)
-	if err != nil {
-		browserAuthorizationError(c, req, autherrors.NewServerError("query idp configs failed"))
-		return
-	}
-	if len(idpConfigs) == 0 {
-		browserAuthorizationError(c, req, autherrors.NewNoConnectionAvailable(""))
-		return
-	}
-
-	flow := types.NewAuthFlow(req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
-	flow.Application = app
-	flow.AuthorizationURL = authorizationURL
-	if len(req.Audiences) > 0 {
-		flow.Services = services
-	} else {
-		flow.Service = &services[0]
-	}
-	flow.SetConnectionMap(h.authenticateSvc.SetConnections(idpConfigs))
-
-	if !requiresFreshAuthentication(req) {
-		if redirected := h.trySSOFastPath(c, ctx, flow); redirected {
-			return
-		}
-	}
-
-	if req.Prompt.Contains(types.PromptNone) {
-		browserAuthorizationError(c, req, autherrors.NewLoginRequired("no active SSO session"))
-		return
-	}
-
-	if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-		browserAuthorizationError(c, req, autherrors.NewServerError("save flow failed"))
-		return
-	}
-
-	setAuthSessionCookie(c, flow.ID)
-	forwardNext(c, flow, browserRedirect)
-}
 func (h *Handler) prepareAuthorizationEntry(c *gin.Context, req *types.AuthRequest, bindErr error) *models.Application {
 	if bindErr != nil && (req.ClientID == "" || req.RedirectURI == "") {
 		browserAuthorizationError(c, nil, bindErr)
