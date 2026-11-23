@@ -16,7 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 
-	pkgtoken "github.com/heliantheon/aegis-go/utilities/token"
 	"github.com/heliantheon/aegis/config"
 	autherrors "github.com/heliantheon/aegis/errors"
 	"github.com/heliantheon/aegis/internal/types"
@@ -32,7 +31,7 @@ func (h *Handler) Discovery(c *gin.Context) {
 		"authorization_endpoint":                issuer + "/authorize",
 		"token_endpoint":                        issuer + "/token",
 		"jwks_uri":                              issuer + "/jwks",
-		"userinfo_endpoint":                     issuer + "/userinfo",
+		"userinfo_endpoint":                     issuer + "/profile",
 		"response_types_supported":              []string{"code"},
 		"response_modes_supported":              []string{"query"},
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token", "client_credentials"},
@@ -53,70 +52,6 @@ func (h *Handler) JWKS(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, keys)
-}
-
-// UserInfo 验证现有 UAT 并按 OIDC scope 返回标准用户声明。
-func (h *Handler) UserInfo(c *gin.Context) {
-	authorization := strings.Fields(c.GetHeader("Authorization"))
-	if len(authorization) != 2 || !strings.EqualFold(authorization[0], "Bearer") {
-		userInfoError(c, http.StatusUnauthorized, "invalid_token")
-		return
-	}
-	verified, err := h.tokenSvc.Verify(c.Request.Context(), authorization[1])
-	if err != nil {
-		userInfoError(c, http.StatusUnauthorized, "invalid_token")
-		return
-	}
-	uat := userInfoToken(verified, config.GetIssuer(), config.GetOIDCDefaultAudience())
-	if uat == nil {
-		userInfoError(c, http.StatusUnauthorized, "invalid_token")
-		return
-	}
-	if !h.allowClientOrigin(c, uat.ClientID()) {
-		return
-	}
-	claims, ok := userInfoClaims(uat)
-	if !ok {
-		userInfoError(c, http.StatusForbidden, "insufficient_scope")
-		return
-	}
-	c.JSON(http.StatusOK, claims)
-}
-
-func userInfoToken(verified pkgtoken.Token, issuer, audience string) *pkgtoken.UserAccessToken {
-	uat, ok := verified.(*pkgtoken.UserAccessToken)
-	if !ok || uat == nil || uat.Issuer() != issuer || uat.Audience() != audience || uat.IsExpired() || uat.OpenID() == "" {
-		return nil
-	}
-	return uat
-}
-
-func userInfoClaims(uat *pkgtoken.UserAccessToken) (gin.H, bool) {
-	scopes := uat.Scopes()
-	if _, ok := scopes["openid"]; !ok {
-		return nil, false
-	}
-	claims := gin.H{"sub": uat.OpenID()}
-	if _, ok := scopes["profile"]; ok {
-		claims["nickname"] = uat.Nickname()
-		claims["picture"] = uat.Picture()
-	}
-	if _, ok := scopes["email"]; ok {
-		claims["email"] = uat.Email()
-	}
-	if _, ok := scopes["phone"]; ok {
-		claims["phone_number"] = uat.Phone()
-	}
-	return claims, true
-}
-
-func userInfoError(c *gin.Context, status int, code string) {
-	challenge := `Bearer error="` + code + `"`
-	if code == "insufficient_scope" {
-		challenge += `, scope="openid"`
-	}
-	c.Header("WWW-Authenticate", challenge)
-	c.JSON(status, gin.H{"error": code})
 }
 
 func bindAuthorizeQuery(c *gin.Context, req *types.AuthRequest) error {

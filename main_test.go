@@ -48,7 +48,7 @@ func TestAuthRouteResponseTraits(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/token", http.StatusBadRequest, "", false, true, false},
 		{http.MethodPost, "/api/revoke", http.StatusBadRequest, "", false, true, false},
-		{http.MethodGet, "/api/userinfo", http.StatusUnauthorized, "", false, true, false},
+		{http.MethodGet, "/api/userinfo", http.StatusNotFound, "", false, false, false},
 		{http.MethodGet, "/api/authorize", http.StatusBadRequest, "", false, true, true},
 		{http.MethodPost, "/api/authorize", http.StatusBadRequest, origin, true, true, true},
 		{http.MethodOptions, "/api/authorize", http.StatusNoContent, origin, true, false, false},
@@ -57,7 +57,7 @@ func TestAuthRouteResponseTraits(t *testing.T) {
 		{http.MethodOptions, "/api/pubkeys", http.StatusNoContent, "*", false, false, false},
 		{http.MethodOptions, "/api/jwks", http.StatusNoContent, "*", false, false, false},
 		{http.MethodOptions, "/api/token", http.StatusNoContent, "*", false, false, false},
-		{http.MethodOptions, "/api/userinfo", http.StatusNoContent, "*", false, false, false},
+		{http.MethodOptions, "/api/userinfo", http.StatusNotFound, "", false, false, false},
 		{http.MethodPost, "/api/check", http.StatusUnauthorized, "", false, true, false},
 	} {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
@@ -153,7 +153,6 @@ func TestPublicOAuthRoutesDoNotRequireCookieSourceEvidence(t *testing.T) {
 		status int
 	}{
 		{http.MethodPost, "/token", http.StatusBadRequest},
-		{http.MethodPost, "/userinfo", http.StatusUnauthorized},
 		{http.MethodPost, "/revoke", http.StatusBadRequest},
 		{http.MethodGet, "/authorize", http.StatusBadRequest},
 	} {

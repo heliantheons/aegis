@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
-	pkgtoken "github.com/heliantheon/aegis-go/utilities/token"
 	"github.com/heliantheon/aegis/config"
 	"github.com/heliantheon/aegis/internal/cache"
 	hermesv1 "github.com/heliantheon/aegis/internal/rpc/hermes/v1"
@@ -459,80 +458,6 @@ func TestAuthorizationNavigationPreservesPostAction(t *testing.T) {
 	}
 }
 
-func buildUserInfoToken(t *testing.T, issuer, audience, scope, openID string, lifetime time.Duration) *pkgtoken.UserAccessToken {
-	t.Helper()
-	built := pkgtoken.NewClaimsBuilder().Issuer(issuer).ClientID("atlas").Audience(audience).ExpiresIn(lifetime).
-		Build(pkgtoken.NewUserAccessTokenBuilder().OpenID(openID).Nickname("Alice").Picture("https://assets.example/alice.png").Email("alice@example.com").Phone("+123456789").Scope(scope))
-	uat, ok := built.(*pkgtoken.UserAccessToken)
-	if !ok {
-		t.Fatalf("built token = %T", built)
-	}
-	pasetoToken, err := pkgtoken.Build(uat)
-	if err != nil {
-		t.Fatal(err)
-	}
-	uat.Claims, err = pkgtoken.ParseClaims(pasetoToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return uat
-}
-
-func TestUserInfoTokenBoundaries(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name, issuer, audience, openID string
-		lifetime                       time.Duration
-		want                           bool
-	}{
-		{"valid UAT", "https://aegis.example/api", "iris", "user", time.Hour, true},
-		{"wrong issuer", "https://evil.example/api", "iris", "user", time.Hour, false},
-		{"wrong audience", "https://aegis.example/api", "hermes", "user", time.Hour, false},
-		{"missing subject", "https://aegis.example/api", "iris", "", time.Hour, false},
-		{"expired UAT", "https://aegis.example/api", "iris", "user", -time.Second, false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			uat := buildUserInfoToken(t, tt.issuer, tt.audience, "openid", tt.openID, tt.lifetime)
-			if got := userInfoToken(uat, "https://aegis.example/api", "iris"); (got != nil) != tt.want {
-				t.Fatalf("userInfoToken() accepted = %v, want %v", got != nil, tt.want)
-			}
-		})
-	}
-	sat := pkgtoken.NewClaimsBuilder().Issuer("https://aegis.example/api").Audience("iris").Build(pkgtoken.NewServiceAccessTokenBuilder())
-	if userInfoToken(sat, "https://aegis.example/api", "iris") != nil {
-		t.Fatal("UserInfo accepted SAT")
-	}
-}
-
-func TestUserInfoFiltersStandardClaimsByScopes(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		scope string
-		keys  []string
-		want  bool
-	}{
-		{"profile email phone", nil, false},
-		{"openid", []string{"sub"}, true},
-		{"openid profile", []string{"sub", "nickname", "picture"}, true},
-		{"openid email", []string{"sub", "email"}, true},
-		{"openid phone", []string{"sub", "phone_number"}, true},
-		{"openid profile email phone", []string{"sub", "nickname", "picture", "email", "phone_number"}, true},
-	} {
-		t.Run(tt.scope, func(t *testing.T) {
-			uat := buildUserInfoToken(t, "https://aegis.example/api", "iris", tt.scope, "user", time.Hour)
-			claims, ok := userInfoClaims(uat)
-			if ok != tt.want || len(claims) != len(tt.keys) {
-				t.Fatalf("userInfoClaims() = %v, %v", claims, ok)
-			}
-			for _, key := range tt.keys {
-				if _, exists := claims[key]; !exists {
-					t.Fatalf("missing %s in %v", key, claims)
-				}
-			}
-		})
-	}
-}
-
 func TestDiscoveryMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -547,7 +472,7 @@ func TestDiscoveryMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	issuer := config.GetIssuer()
-	if metadata["issuer"] != issuer || metadata["authorization_endpoint"] != issuer+"/authorize" || metadata["jwks_uri"] != issuer+"/jwks" {
+	if metadata["issuer"] != issuer || metadata["authorization_endpoint"] != issuer+"/authorize" || metadata["jwks_uri"] != issuer+"/jwks" || metadata["userinfo_endpoint"] != issuer+"/profile" {
 		t.Fatalf("discovery metadata = %v", metadata)
 	}
 }
