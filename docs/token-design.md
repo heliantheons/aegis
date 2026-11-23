@@ -451,13 +451,13 @@ d. 匹配成功 → ParseV4Public 验签
 
 UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确认的 client_id 检查应用 `allowed_origins`；URL 查询参数不能选择其他客户端的来源策略。跨域预检不携带 Token，先执行通用预检，实际请求仍需通过完整的凭证、来源和 scope 校验。
 
-`GET /api/authorize` 和 `POST /api/authorize` 统一挂载 `Authorize`。GET 只读取 query，正常导航使用浏览器跳转；授权错误仅在 client 与 redirect URI 通过注册校验后回跳。POST 只读取 body，保留 Pallas 的 API 契约：下一步通过 HTTP 300 + `Location` 交给前端执行，错误返回本地 JSON，不自动跟随浏览器重定向；绑定失败时不查询应用注册信息。
+`GET /api/authorize` 和 `POST /api/authorize` 统一挂载 `Authorize`。GET 只读取 query，POST 只读取 body；绑定失败均立即返回本地 HTTP 400 JSON，不查询应用注册信息、不回跳。绑定完成后的 GET 授权错误仅在 client 与 redirect URI 通过注册校验后回跳。POST 保留 Pallas 的 API 契约：下一步通过 HTTP 300 + `Location` 交给前端执行，授权错误返回本地 JSON。
 
 参数绑定结果、客户端与回调地址校验、错误响应以及协议参数检查均由 `Authorize` 直接处理。后续会话流程只接收已校验的请求和应用信息，不把先前产生的错误作为参数传入另一层处理。
 
 GET 和 POST 授权入口将请求保存在服务端 AuthFlow.Request 中，auth-session Cookie 仅保存 flow ID。`GET /api/context` 仅提供当前应用和服务的展示信息，不向前端回显完整授权请求。认证流程过期时，Pallas 使用统一弹窗提示，用户确认后重新加载当前页面；不缓存请求参数，也不自动重新发起授权。
 
-授权参数复用 `AuthRequest` 的 form 标签进行绑定，`scope` 和 `prompt` 通过现有 `SpaceDelimited.UnmarshalText` 解析，`audiences` 通过 JSON 对象绑定；不另行维护字段映射。单值扩展参数（包括 `resource`、`response_mode` 和自定义参数）按现有标准字段分类存入 `Params`，随请求 JSON 平铺到顶层；JSON body 沿用 `AuthRequest.UnmarshalJSON`。OIDC 层额外检查参数唯一性、严格的 `max_age` 格式、支持的 `response_mode` 和非空 `audiences`，query 与 body 的参数来源保持隔离。
+授权参数复用 `AuthRequest` 的 form 标签进行绑定，`scope` 和 `prompt` 通过现有 `SpaceDelimited.UnmarshalText` 解析，`audiences` 通过 JSON 对象绑定；必填字段统一由 Gin 的 `binding` 标签校验，不在 handler 重复检查。单值扩展参数（包括 `resource`、`response_mode` 和自定义参数）按现有标准字段分类存入 `Params`，随请求 JSON 平铺到顶层；JSON body 沿用 `AuthRequest.UnmarshalJSON`。绑定阶段同时检查参数唯一性、严格的 `max_age` 格式、支持的 `response_mode` 和非空 `audiences`，query 与 body 的参数来源保持隔离。
 
 内部 Pallas 的 XHR 登录/MFA 操作继续使用 HTTP 300 与 `Location` 指令；浏览器顶层授权入口使用正常 HTTP 跳转。重定向 URI 精确匹配注册值，授权错误仅回到已验证的客户端 URI。`prompt`、`max_age` 与实际认证时间共同决定是否允许 SSO 复用。
 

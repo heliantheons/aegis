@@ -154,11 +154,6 @@ func bindAuthorizeBody(c *gin.Context, req *types.AuthRequest) error {
 }
 
 func bindAuthorizeParameters(query url.Values, req *types.AuthRequest) error {
-	if len(query["client_id"]) != 1 || len(query["redirect_uri"]) != 1 {
-		req.RedirectURI = ""
-		return autherrors.NewInvalidRequest("client_id and redirect_uri must occur exactly once")
-	}
-	bindErr := binding.MapFormWithTag(req, query, "form")
 	for _, values := range query {
 		if len(values) != 1 {
 			return autherrors.NewInvalidRequest("authorization parameters must not repeat")
@@ -170,8 +165,11 @@ func bindAuthorizeParameters(query url.Values, req *types.AuthRequest) error {
 	if age, ok := query["max_age"]; ok && (age[0] == "" || age[0] != strings.TrimSpace(age[0])) {
 		return autherrors.NewInvalidRequest("max_age must be a nonnegative integer")
 	}
-	if bindErr != nil {
-		return autherrors.NewInvalidRequest(bindErr.Error())
+	if err := binding.MapFormWithTag(req, query, "form"); err != nil {
+		return autherrors.NewInvalidRequest(err.Error())
+	}
+	if err := binding.Validator.ValidateStruct(req); err != nil {
+		return autherrors.NewInvalidRequest(err.Error())
 	}
 	if query.Has("audiences") && len(req.Audiences) == 0 {
 		return autherrors.NewInvalidRequest("audiences must be a nonempty JSON object")

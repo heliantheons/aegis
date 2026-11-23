@@ -62,6 +62,12 @@ func TestBindAuthorizeParameters(t *testing.T) {
 		}},
 		{name: "explicit zero max age", change: func(q url.Values) { q.Set("max_age", "0") }},
 		{name: "positive max age", change: func(q url.Values) { q.Set("max_age", "3600") }, maxAge: 3600},
+		{name: "missing client", change: func(q url.Values) { q.Del("client_id") }, wantErr: true},
+		{name: "empty client", change: func(q url.Values) { q.Set("client_id", "") }, wantErr: true},
+		{name: "missing redirect", change: func(q url.Values) { q.Del("redirect_uri") }, wantErr: true},
+		{name: "empty redirect", change: func(q url.Values) { q.Set("redirect_uri", "") }, wantErr: true},
+		{name: "missing response type", change: func(q url.Values) { q.Del("response_type") }, wantErr: true},
+		{name: "empty response type", change: func(q url.Values) { q.Set("response_type", "") }, wantErr: true},
 		{name: "repeated state", change: func(q url.Values) { q.Add("state", "attacker") }, wantErr: true},
 		{name: "repeated redirect", change: func(q url.Values) { q.Add("redirect_uri", "https://evil.example") }, wantErr: true},
 		{name: "repeated extension", change: func(q url.Values) {
@@ -322,7 +328,7 @@ func TestAuthorizeIsolatesGetAndPostParameterSources(t *testing.T) {
 	}
 }
 
-func TestAuthorizationQueryErrorsValidateRegistryBeforeRedirect(t *testing.T) {
+func TestAuthorizationErrorsRespectBindingAndRedirectBoundaries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tt := range []struct {
 		name      string
@@ -337,13 +343,21 @@ func TestAuthorizationQueryErrorsValidateRegistryBeforeRedirect(t *testing.T) {
 		{name: "unknown client", reject: true, lookup: true},
 		{name: "duplicate client", change: func(q url.Values) { q.Add("client_id", "other") }},
 		{name: "duplicate redirect", change: func(q url.Values) { q.Add("redirect_uri", "https://evil.example/callback") }},
+		{name: "duplicate state", change: func(q url.Values) { q.Add("state", "duplicate") }},
+		{name: "missing client", change: func(q url.Values) { q.Del("client_id") }},
+		{name: "empty client", change: func(q url.Values) { q.Set("client_id", "") }},
+		{name: "missing redirect", change: func(q url.Values) { q.Del("redirect_uri") }},
+		{name: "empty redirect", change: func(q url.Values) { q.Set("redirect_uri", "") }},
+		{name: "missing response type", change: func(q url.Values) { q.Del("response_type") }},
+		{name: "empty response type", change: func(q url.Values) { q.Set("response_type", "") }},
+		{name: "invalid max age", change: func(q url.Values) { q.Set("max_age", "abc") }},
 		{name: "malformed query", malformed: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			registry := &authorizationRegistry{reject: tt.reject}
 			h := authorizationHandler(t, registry)
 			query := standardAuthorizationQuery()
-			query.Add("state", "duplicate")
+			query.Set("response_type", "token")
 			if tt.change != nil {
 				tt.change(query)
 			}
@@ -362,13 +376,16 @@ func TestAuthorizationQueryErrorsValidateRegistryBeforeRedirect(t *testing.T) {
 				if recorder.Code < 400 || recorder.Header().Get("Location") != "" {
 					t.Fatalf("unvalidated error = %d %q", recorder.Code, recorder.Header().Get("Location"))
 				}
+				if !tt.lookup && recorder.Code != http.StatusBadRequest {
+					t.Fatalf("binding error status = %d, want 400", recorder.Code)
+				}
 				return
 			}
 			u, err := url.Parse(recorder.Header().Get("Location"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if recorder.Code != http.StatusSeeOther || u.Host != "atlas.example" || u.Query().Get("error") != "invalid_request" {
+			if recorder.Code != http.StatusSeeOther || u.Host != "atlas.example" || u.Query().Get("error") != "unsupported_response_type" || u.Query().Get("state") != query.Get("state") {
 				t.Fatalf("validated error = %d %s", recorder.Code, u)
 			}
 		})
@@ -399,7 +416,7 @@ func TestAuthorizationBodyBindingErrorsRejectUnregisteredRedirects(t *testing.T)
 	}
 }
 
-func TestAuthorizationBindingErrorsValidateRegisteredRedirect(t *testing.T) {
+func TestAuthorizationBindingErrorsStopBeforeRegistry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		registry := &authorizationRegistry{}
@@ -418,18 +435,8 @@ func TestAuthorizationBindingErrorsValidateRegisteredRedirect(t *testing.T) {
 		router := gin.New()
 		router.Handle(method, "/api/authorize", h.Authorize)
 		router.ServeHTTP(recorder, request)
-		if method == http.MethodPost {
-			if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || registry.lookups != 0 || !strings.Contains(recorder.Body.String(), `"error":"invalid_request"`) {
-				t.Fatalf("POST binding error = %d %q %s, registry lookups = %d", recorder.Code, recorder.Header().Get("Location"), recorder.Body.String(), registry.lookups)
-			}
-			continue
-		}
-		u, err := url.Parse(recorder.Header().Get("Location"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if recorder.Code != http.StatusSeeOther || registry.lookups != 1 || u.Host != "atlas.example" || u.Query().Get("error") != "invalid_request" || u.Query().Get("state") != query.Get("state") {
-			t.Fatalf("%s binding error = %d %s, registry lookups = %d", method, recorder.Code, u, registry.lookups)
+		if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Location") != "" || registry.lookups != 0 || !strings.Contains(recorder.Body.String(), `"error":"invalid_request"`) {
+			t.Fatalf("%s binding error = %d %q %s, registry lookups = %d", method, recorder.Code, recorder.Header().Get("Location"), recorder.Body.String(), registry.lookups)
 		}
 	}
 }

@@ -111,20 +111,14 @@ func GetClientClaims(c *gin.Context) *pkgtoken.ClientToken {
 // Authorize 处理 GET/POST /api/authorize。
 func (h *Handler) Authorize(c *gin.Context) {
 	req := new(types.AuthRequest)
-	isGet := c.Request.Method == http.MethodGet
-	var bindErr error
-	if isGet {
-		bindErr = bindAuthorizeQuery(c, req)
+	var err error
+	if c.Request.Method == http.MethodGet {
+		err = bindAuthorizeQuery(c, req)
 	} else {
-		bindErr = bindAuthorizeBody(c, req)
+		err = bindAuthorizeBody(c, req)
 	}
-	hasClientRedirect := req.ClientID != "" && req.RedirectURI != ""
-	if bindErr != nil && (!isGet || !hasClientRedirect) {
-		authorizationError(c, nil, bindErr)
-		return
-	}
-	if !hasClientRedirect {
-		authorizationError(c, nil, autherrors.NewInvalidRequest("client_id and redirect_uri are required"))
+	if err != nil {
+		authorizationError(c, nil, err)
 		return
 	}
 	app, err := h.cache.GetApplication(c.Request.Context(), req.ClientID)
@@ -134,10 +128,6 @@ func (h *Handler) Authorize(c *gin.Context) {
 	}
 	if !validAuthorizationRedirect(&app.Application, req.RedirectURI) {
 		authorizationError(c, nil, autherrors.NewInvalidRequest("invalid redirect_uri"))
-		return
-	}
-	if bindErr != nil {
-		authorizationError(c, req, bindErr)
 		return
 	}
 	if req.Audience == "" && len(req.Audiences) == 0 {
@@ -975,9 +965,6 @@ func (h *Handler) beginAuthorization(c *gin.Context, req *types.AuthRequest, app
 }
 
 func validateAuthorizeRequest(req *types.AuthRequest) *autherrors.AuthError {
-	if req.ResponseType == "" || req.ClientID == "" || req.RedirectURI == "" {
-		return autherrors.NewInvalidRequest("response_type, client_id and redirect_uri are required")
-	}
 	if req.ResponseType != "code" {
 		return autherrors.New(http.StatusBadRequest, "unsupported_response_type", "only response_type code is supported")
 	}
