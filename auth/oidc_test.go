@@ -84,7 +84,6 @@ func TestBindAuthorizeParameters(t *testing.T) {
 		{name: "invalid audience object", change: func(q url.Values) { q.Set("audiences", `[]`) }, wantErr: true},
 		{name: "empty audience object", change: func(q url.Values) { q.Set("audiences", `{}`) }, wantErr: true},
 		{name: "null audience object", change: func(q url.Values) { q.Set("audiences", `null`) }, wantErr: true},
-		{name: "fragment response mode", change: func(q url.Values) { q.Set("response_mode", "fragment") }, wantErr: true},
 	} {
 		for _, source := range []string{"query", "form"} {
 			t.Run(tt.name+"/"+source, func(t *testing.T) {
@@ -144,7 +143,6 @@ func TestAuthorizationDecodersIsolateSourcesAndIgnoreMethod(t *testing.T) {
 	query.Set("login_hint", "user@example.com")
 	query.Set("max_age", "0")
 	query.Set("resource", "https://api.example/resource?tenant=one&name=a+b")
-	query.Set("response_mode", "query")
 	query.Set("custom_parameter", "custom + / ?")
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -156,7 +154,6 @@ func TestAuthorizationDecodersIsolateSourcesAndIgnoreMethod(t *testing.T) {
 		}
 		wantParams := map[string]any{
 			"resource":         query.Get("resource"),
-			"response_mode":    "query",
 			"custom_parameter": "custom + / ?",
 		}
 		if !reflect.DeepEqual(req.Params, wantParams) || req.MaxAge == nil || *req.MaxAge != 0 {

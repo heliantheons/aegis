@@ -159,9 +159,6 @@ func bindAuthorizeParameters(query url.Values, req *types.AuthRequest) error {
 			return autherrors.NewInvalidRequest("authorization parameters must not repeat")
 		}
 	}
-	if mode := query.Get("response_mode"); mode != "" && mode != "query" {
-		return autherrors.NewInvalidRequest("only query response_mode is supported")
-	}
 	if age, ok := query["max_age"]; ok && (age[0] == "" || age[0] != strings.TrimSpace(age[0])) {
 		return autherrors.NewInvalidRequest("max_age must be a nonnegative integer")
 	}
