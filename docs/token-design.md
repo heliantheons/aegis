@@ -420,7 +420,7 @@ d. 匹配成功 → ParseV4Public 验签
 
 跨域、缓存和导航隐私按行为组合，复用独立中间件；现有 PASETO 凭证格式保持不变。
 
-- 服务仅提供一份 `cors.origins`，用于显式信任可调用登录会话、context、connections、idps、login、binding、challenge、logout 等接口的前端；Aegis endpoint 始终包含在可信来源中，额外列表可为空。环境覆盖名为 `AEGIS_CORS_ORIGINS`，列表使用空格分隔。可信 origin 必须是无路径、查询、用户信息的完整 HTTP(S) origin，不允许 `*` 或 `null`。应用 `allowed_origins` 独立控制 token、revoke 及后续 UserInfo 等客户端协议操作，不授予登录 API 访问权。
+- 服务仅提供一份 `cors.origins`，用于显式信任可调用登录会话、context、connections、idps、login、binding、challenge、logout 等接口的前端；Aegis endpoint 始终包含在可信来源中，额外列表可为空。环境覆盖名为 `AEGIS_CORS_ORIGINS`，列表使用空格分隔。可信 origin 必须是无路径、查询、用户信息的完整 HTTP(S) origin，不允许 `*` 或 `null`。应用 `allowed_origins` 独立控制 token、revoke 等客户端协议操作，不授予登录 API 或账号管理 API 访问权。
 - profile、identities、mfa 等账号业务接口不挂载 CORS，也不提供跨域预检；前端通过业务服务自己的同源地址访问，例如 Iris 的相对路径 `/api`。接口保留现有 Iris Bearer guard、用户归属校验与 NoStore；服务端调用仍按业务凭证和权限处理，不新增来源白名单。授权入口保留现有 `POST /api/authorize`，HTTP 中间件重构不迁移业务路由。
 - `middleware.Preflight` 和 `middleware.CORS` 是独立中间件：前者只处理同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的完整预检，后者只校验实际请求的来源并生成响应头。静态来源场景在路由上按 `Preflight(options)`、`CORS(options)` 顺序组合；不使用模式布尔值。token/revoke 只挂载通用 POST 预检，实际请求在验证客户端后调用 `AllowOrigin` 检查应用策略，拒绝来源返回 403。跨域中间件不解析请求体、`client_id` 或应用缓存；允许响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
 - 元数据和公钥是公开信息；`/api/pubkeys` 保留任意来源读取及公共缓存，不开放跨域凭证。`middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和 `Pragma: no-cache`，覆盖认证会话、账户管理、token、撤销和 Bearer 权限检查的成功、错误及跳转响应。`middleware.NoReferrer` 用于授权入口及上游身份提供方回调。
@@ -433,7 +433,7 @@ d. 匹配成功 → ParseV4Public 验签
 - Issuer 为 Aegis 的 HTTPS `endpoint + /api`；ID Token 的 `aud` 为登录应用的 `client_id`。
 - 使用 Authorization Code + PKCE S256。请求 `openid` scope 时，授权码兑换同时返回标准 JWT `id_token` 和原有 PASETO `access_token`。
 - ID Token 使用独立 RSA 密钥和 RS256 签名，JOSE header 包含 `kid`。`iat`、`exp`、`auth_time` 使用 Unix 秒，`nonce` 原样关联授权请求。
-- `profile` 对应 `nickname`、`picture`，`email` 对应 `email`，`phone` 对应 `phone_number`；仅返回已授予 scope 对应的资料。
+- ID Token 中 `profile` 对应 `nickname`、`picture`，`email` 对应 `email`，`phone` 对应 `phone_number`；仅包含已授予 scope 对应的资料。
 - UAT/SAT/CT 的格式、claims、域签名、嵌套加密和 Go guard 解析契约保持原样。ID Token 不进入 PASETO 的构建或类型检测链路。
 
 ### 8.2 公开端点
@@ -445,11 +445,11 @@ d. 匹配成功 → ParseV4Public 验签
 | `GET /authorize` | 标准浏览器授权入口，读取 query，使用浏览器跳转，不开放 CORS |
 | `POST /authorize` | 保留 Pallas 授权 API，读取 body，返回 HTTP 300 + Location 或 JSON 错误；沿用可信登录前端的 CORS 和 Cookie 来源防护 |
 | `POST /token` | 接收标准 form 授权码和刷新请求；保留已有多 audience 扩展 |
-| `GET /userinfo`、`POST /userinfo` | 验证 UserInfo 资源的 PASETO UAT，校验 issuer、audience、openid scope，返回标准用户声明 |
+| `GET /profile` | 使用 Iris Access Token 查询当前用户的业务资料，沿用现有 Iris guard 和资料响应 |
 
-未指定 audience 的标准登录请求使用 `oidc.default-audience`（默认 Iris）；仍执行现有应用服务关系校验。UserInfo 仅接受该受众的用户访问令牌。显式请求其他业务资源的 Access Token 继续用于相应业务 API。
+未指定 audience 的登录请求使用 `oidc.default-audience`（默认 Iris）；仍执行现有应用服务关系校验。资料接口固定要求 Iris Token。显式请求其他业务资源的 Access Token 继续用于相应业务 API。
 
-UserInfo 在验证 UAT 的签名、issuer 和 audience 后，使用 Token 中确认的 client_id 检查应用 `allowed_origins`；URL 查询参数不能选择其他客户端的来源策略。跨域预检不携带 Token，先执行通用预检，实际请求仍需通过完整的凭证、来源和 scope 校验。
+Discovery 的 `userinfo_endpoint` 指向现有 `/profile`，不提供独立 `/userinfo` 路由。资料接口沿用业务响应字段 `id`、`nickname`、`picture`、`email`、`email_verified` 和 `phone`，从 Hermes 读取当前资料，不提供 OIDC UserInfo 的 `sub` / `phone_number` 字段映射或按 scope 裁剪。客户端需要支持该资料契约；依赖标准 UserInfo 响应的客户端不在支持范围内。接口继续使用 Iris Bearer guard、用户归属校验和 NoStore，不提供跨域预检或 CORS 授权；浏览器通过业务同源代理访问，服务端调用直接携带 Iris Token。
 
 `GET /api/authorize` 和 `POST /api/authorize` 统一挂载 `Authorize`。GET 只读取 query，POST 只读取 body；绑定失败均立即返回本地 HTTP 400 JSON，不查询应用注册信息、不回跳。绑定完成后的 GET 授权错误仅在 client 与 redirect URI 通过注册校验后回跳。POST 保留 Pallas 的 API 契约：下一步通过 HTTP 300 + `Location` 交给前端执行，授权错误返回本地 JSON。
 

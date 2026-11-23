@@ -143,13 +143,11 @@ func registerAuthRoutes(api *gin.RouterGroup, aegisHandler *auth.Handler, corsOp
 	}
 	protocol := api.Group("", middleware.Preflight(middleware.CORSOptions{
 		ResolveOrigin: middleware.AnyOrigin,
-		AllowMethods:  []string{"GET", "POST", "OPTIONS"},
+		AllowMethods:  []string{"POST", "OPTIONS"},
 	}), middleware.NoStore)
-	protocol.GET("/userinfo", aegisHandler.UserInfo)
-	protocol.POST("/userinfo", aegisHandler.UserInfo)
 	protocol.POST("/token", aegisHandler.Token)
 	protocol.POST("/revoke", aegisHandler.Revoke)
-	for _, path := range []string{"/userinfo", "/token", "/revoke"} {
+	for _, path := range []string{"/token", "/revoke"} {
 		protocol.OPTIONS(path)
 	}
 
