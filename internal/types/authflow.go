@@ -62,6 +62,7 @@ type AuthFlow struct {
 
 	// 额外数据（不序列化，仅在当前请求生命周期内有效）
 	Extra map[string]string `json:"-"`
+	SSO   map[string]string `json:"-"`
 
 	// 错误状态（发生错误时填充）
 	Error *FlowError `json:"error,omitempty"`

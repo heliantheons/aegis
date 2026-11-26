@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -112,79 +112,43 @@ func GetClientClaims(c *gin.Context) *pkgtoken.ClientToken {
 // Authorize POST /api/authorize
 // 创建认证会话
 func (h *Handler) Authorize(c *gin.Context) {
-	var req types.AuthRequest
-	if err := c.ShouldBind(&req); err != nil {
-		h.authorizeErrorResponse(c, autherrors.NewInvalidRequest(err.Error()))
+	req := new(types.AuthRequest)
+	if err := c.ShouldBind(req); err != nil {
+		h.respondAuthorizeError(c, nil, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
-
-	if authErr := validateAuthorizeRequest(&req); authErr != nil {
-		h.authorizeErrorResponse(c, authErr)
-		return
-	}
-
 	ctx := c.Request.Context()
-	logger.Debugf("[Handler] Authorize request: %+v", req)
-
-	app, err := h.provisionSvc.GetApplication(ctx, req.ClientID)
+	flow, err := h.prepareAuthorization(ctx, req)
 	if err != nil {
-		h.authorizeErrorResponse(c, autherrors.NewClientNotFoundf("application not found: %s", req.ClientID))
+		h.respondAuthorizeError(c, flow, err)
 		return
 	}
-	if !app.ValidateAllowedRedirectURI(req.RedirectURI) {
-		h.authorizeErrorResponse(c, autherrors.NewInvalidRequest("invalid redirect_uri"))
-		return
-	}
-
-	audiences, authErr := collectAudiences(&req)
-	if authErr != nil {
-		h.authorizeErrorResponse(c, authErr)
-		return
-	}
-
-	services, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
-	if authErr != nil {
-		h.authorizeErrorResponse(c, authErr)
-		return
-	}
-
-	idpConfigs, err := h.provisionSvc.ListApplicationIDPConfigs(ctx, req.ClientID)
-	if err != nil {
-		h.authorizeErrorResponse(c, autherrors.NewServerError("query idp configs failed"))
-		return
-	}
-	if len(idpConfigs) == 0 {
-		h.authorizeErrorResponse(c, autherrors.NewNoConnectionAvailable(""))
-		return
-	}
-
-	flow := types.NewAuthFlow(&req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
-	flow.Application = app
-	if len(req.Audiences) > 0 {
-		flow.Services = services
-	} else {
-		flow.Service = &services[0]
-	}
-	flow.SetConnectionMap(h.authenticateSvc.SetConnections(idpConfigs))
-
 	if !req.Prompt.Contains(types.PromptLogin) {
-		if redirected := h.trySSOFastPath(c, ctx, flow); redirected {
-			return
+		if raw := getSSOCookie(c); raw != "" {
+			if sso, err := h.verifySSOToken(ctx, raw); err != nil {
+				clearSSOCookie(c)
+			} else {
+				flow.SSO = sso.GetIdentities()
+				h.restoreSSO(ctx, flow)
+			}
 		}
 	}
-
-	if req.Prompt.Contains(types.PromptNone) {
-		h.authorizeErrorResponse(c, autherrors.NewLoginRequired("no active SSO session"))
+	var code *cache.AuthorizationCode
+	if flow.State == types.FlowStateAuthenticated {
+		code, err = h.authorizeAndGenerateCode(ctx, flow)
+		if err != nil {
+			h.respondAuthorizeError(c, flow, err)
+			return
+		}
+	} else if req.Prompt.Contains(types.PromptNone) {
+		h.respondAuthorizeError(c, flow, autherrors.NewLoginRequired("no active SSO session"))
 		return
 	}
-
 	if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-		h.authorizeErrorResponse(c, autherrors.NewServerError("save flow failed"))
+		h.respondAuthorizeError(c, flow, autherrors.NewServerError("save flow failed"))
 		return
 	}
-
-	setAuthSessionCookie(c, flow.ID)
-	forwardNext(c, flow)
+	h.respondAuthorize(c, flow, code)
 }
 
 // --- 上下文查询 ---
@@ -193,8 +157,8 @@ func (h *Handler) Authorize(c *gin.Context) {
 // 获取当前认证流程的应用和服务信息
 func (h *Handler) GetContext(c *gin.Context) {
 	// 从 Cookie 获取 flowID
-	flowID, err := getAuthSessionCookie(c)
-	if err != nil || flowID == "" {
+	flowID := getAuthSessionCookie(c)
+	if flowID == "" {
 		h.errorResponse(c, autherrors.NewFlowNotFound("missing session"))
 		return
 	}
@@ -221,8 +185,8 @@ func (h *Handler) GetContext(c *gin.Context) {
 // 获取可用的 Connection 配置（按类型分类：idp, vchan, factor）
 func (h *Handler) GetConnections(c *gin.Context) {
 	// 从 Cookie 获取 flowID
-	flowID, err := getAuthSessionCookie(c)
-	if err != nil || flowID == "" {
+	flowID := getAuthSessionCookie(c)
+	if flowID == "" {
 		h.errorResponse(c, autherrors.NewFlowNotFound("missing session"))
 		return
 	}
@@ -253,78 +217,42 @@ func (h *Handler) Login(c *gin.Context) {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
-
-	logger.Infof("[Login] 登录请求: %s", req)
-
-	// 从 Cookie 获取 flowID
-	flowID, err := getAuthSessionCookie(c)
-	if err != nil || flowID == "" {
-		h.errorResponse(c, autherrors.NewFlowNotFound("missing session"))
-		return
-	}
-
 	ctx := helpers.WithRemoteIP(c.Request.Context(), c.ClientIP())
-
-	// 1. 获取 AuthFlow
-	flow := h.authenticateSvc.GetAndValidateFlow(ctx, flowID)
-	if flow.Failed() {
-		h.flowErrorResponse(c, flow)
+	flow, err := h.loadFlow(ctx, getAuthSessionCookie(c))
+	if err != nil {
+		h.respondFlowError(c, flow, err)
 		return
 	}
-
-	// defer 统一持久化 flow（无论成功失败都保存最新状态）
-	// flow 的最终清理由 token exchange 完成（ConsumeAuthCode 后删除 flow）
-	defer func() {
-		if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-			logger.Warnf("[Handler] 保存 flow 失败: %v", err)
-		}
-	}()
-
-	// 2. 验证并设置当前 Connection
+	defer h.saveFlow(ctx, flow)
 	if !authenticator.GlobalRegistry().Has(req.Connection) {
 		h.errorResponse(c, autherrors.NewInvalidRequestf("unsupported connection: %s", req.Connection))
 		return
 	}
 	flow.SetConnection(req.Connection)
 	flow.SetExtra(types.ExtraKeyStrategy, req.Strategy)
-
-	// 3. 执行认证流程（已验证的 connection 跳过）
-	passed, err := h.authenticate(c, ctx, flow, &req)
+	passed, err := h.authenticateFlow(ctx, flow, &req)
 	if err != nil {
 		h.errorResponse(c, err)
 		return
 	}
 	if !passed {
+		h.respondFlow(c, flow, nil, false)
 		return
 	}
-
-	// 4. 查找或创建用户，回写用户信息和全部身份到 flow
 	if err := h.resolveUser(ctx, flow); err != nil {
-		if errors.Is(err, errIdentifiedUser) {
-			actionRedirect(c, buildActionURL([]string{"identify"}))
-			return
-		}
-		logger.Errorf("[Handler] 用户解析失败 - FlowID: %s, Error: %v", flow.ID, err)
 		h.errorResponse(c, err)
 		return
 	}
-	logger.Infof("[Handler] 用户解析完成 - FlowID: %s, UserID: %s", flow.ID, flow.User.OpenID)
-
-	// 5. 授权并生成授权码
-	authCode, err := h.authorizeAndGenerateCode(ctx, flow)
+	if flow.IdentifiedUser() {
+		h.respondFlow(c, flow, nil, false)
+		return
+	}
+	code, err := h.authorizeAndGenerateCode(ctx, flow)
 	if err != nil {
-		logger.Errorf("[Handler] 授权签发失败 - FlowID: %s, Error: %v", flow.ID, err)
 		h.errorResponse(c, err)
 		return
 	}
-	logger.Infof("[Handler] Login 完成 - FlowID: %s, Connection: %s", flow.ID, req.Connection)
-
-	// 6. 签发 SSO Token
-	h.issueSSOCookie(c, ctx, flow)
-
-	// 7. 构建最终重定向
-	clearAuthSessionCookie(c)
-	actionRedirect(c, buildAuthCodeRedirectURL(flow.Request.RedirectURI, authCode))
+	h.respondFlow(c, flow, code, false)
 }
 
 // --- IDP authentication entry ---
@@ -340,74 +268,33 @@ func (h *Handler) IDPs(c *gin.Context) {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
-
 	ctx := helpers.WithRemoteIP(c.Request.Context(), c.ClientIP())
-	flow := h.loadAuthFlow(c, ctx)
-	if flow == nil {
+	flow, err := h.loadFlow(ctx, getAuthSessionCookie(c))
+	if err != nil {
+		h.respondFlowError(c, flow, err)
 		return
 	}
 	defer h.saveFlow(ctx, flow)
-
 	if err := ensureIDPEnabled(flow, req.Connection); err != nil {
 		h.errorResponse(c, err)
 		return
 	}
 	flow.SetConnection(req.Connection)
 	flow.SetExtra(types.ExtraKeyStrategy, req.Strategy)
-
-	if actions := unmetRequirements(flow); len(actions) > 0 {
-		actionRedirect(c, buildActionURL(actions))
+	if len(unmetRequirements(flow)) > 0 {
+		h.respondFlow(c, flow, nil, false)
 		return
 	}
-
-	initiator, err := h.idpInitiator(req.Connection)
+	initiation, providerURL, err := h.initiateIDP(ctx, flow, &req)
 	if err != nil {
 		h.errorResponse(c, err)
 		return
 	}
-
-	initiation := &idp.InitiateContext{Flow: flow}
-	if idp.IsOAuthRedirectConnection(req.Connection) {
-		transaction, txErr := idp.NewOAuthTransaction(flow.ID, req.Connection, config.GetIDPRedirectURI(req.Connection))
-		if txErr != nil {
-			h.errorResponse(c, autherrors.NewServerError("oauth transaction initialization failed"))
-			return
-		}
-		initiation.Transaction = transaction
-	}
-
-	resp, err := initiator.Initiate(ctx, initiation, req.Strategy)
-	if err != nil {
-		logger.Errorf("[IDPs] 初始化失败 - FlowID: %s, Connection: %s, Error: %v", flow.ID, req.Connection, err)
-		h.errorResponse(c, autherrors.NewServerErrorf("idp initiate failed: %v", err))
+	if providerURL != "" {
+		actionRedirect(c, providerURL)
 		return
 	}
-
-	if idp.IsOAuthRedirectConnection(req.Connection) {
-		if resp.URL == "" {
-			h.errorResponse(c, autherrors.NewServerError("oauth authorization URL is empty"))
-			return
-		}
-		if err := validateOAuthAuthorizationURL(req.Connection, resp.URL, initiation.Transaction); err != nil {
-			h.errorResponse(c, autherrors.NewServerError("oauth authorization URL is invalid"))
-			return
-		}
-		if err := h.authenticateSvc.SaveOAuthTransaction(ctx, initiation.Transaction, config.GetOAuthStateExpiresIn()); err != nil {
-			h.errorResponse(c, autherrors.NewServerError("save oauth transaction failed"))
-			return
-		}
-		actionRedirect(c, resp.URL)
-		return
-	}
-
-	c.JSON(http.StatusOK, &IDPInitiateResponse{
-		Connection: req.Connection,
-		UID:        resp.UID,
-		URL:        resp.URL,
-		Action:     resp.Action,
-		Params:     resp.Params,
-		Options:    resp.Options,
-	})
+	c.JSON(http.StatusOK, initiation)
 }
 
 // OAuthCallback completes an upstream Google/GitHub authorization request.
@@ -416,19 +303,20 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Referrer-Policy", "no-referrer")
 
-	connection, flowID, transaction, ok := h.consumeOAuthCallbackTransaction(c)
-	if !ok {
+	ctx := helpers.WithRemoteIP(c.Request.Context(), c.ClientIP())
+	connection := c.Param("connection")
+	flowID := getAuthSessionCookie(c)
+	transaction, err := h.consumeOAuthCallbackTransaction(ctx, connection, flowID, c.Query("state"))
+	if err != nil {
+		h.errorResponse(c, err)
 		return
 	}
-
-	ctx := helpers.WithRemoteIP(c.Request.Context(), c.ClientIP())
-	flow := h.authenticateSvc.GetAndValidateFlow(ctx, flowID)
-	if flow.Failed() {
-		h.flowErrorResponse(c, flow)
+	flow, err := h.loadFlow(ctx, flowID)
+	if err != nil {
+		h.respondFlowError(c, flow, err)
 		return
 	}
 	defer h.saveFlow(ctx, flow)
-
 	if err := ensureIDPEnabled(flow, connection); err != nil {
 		h.errorResponse(c, err)
 		return
@@ -437,45 +325,37 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 		browserRedirect(c, oauthErrorURL("access_denied"))
 		return
 	}
-
 	code := c.Query("code")
 	if code == "" {
 		h.errorResponse(c, autherrors.NewInvalidRequest("authorization code is required"))
 		return
 	}
-
 	flow.SetConnection(connection)
 	flow.SetExtra(types.ExtraKeyOAuthRedirectURI, transaction.RedirectURI)
 	flow.SetExtra(types.ExtraKeyOAuthCodeVerifier, transaction.CodeVerifier)
-	req := &LoginRequest{Connection: connection, Proof: code}
-	passed, err := h.authenticate(c, ctx, flow, req)
+	passed, err := h.authenticateFlow(ctx, flow, &LoginRequest{Connection: connection, Proof: code})
 	if err != nil {
-		logger.Errorf("[OAuthCallback] 上游认证失败 - FlowID: %s, Connection: %s, Error: %v", flow.ID, connection, err)
 		browserRedirect(c, oauthErrorURL("provider_failed"))
 		return
 	}
 	if !passed {
+		h.respondFlow(c, flow, nil, true)
 		return
 	}
-
 	if err := h.resolveUser(ctx, flow); err != nil {
-		if errors.Is(err, errIdentifiedUser) {
-			browserRedirect(c, "/binding")
-			return
-		}
-		logger.Errorf("[OAuthCallback] 用户解析失败 - FlowID: %s, Error: %v", flow.ID, err)
 		h.errorResponse(c, err)
 		return
 	}
-
+	if flow.IdentifiedUser() {
+		h.respondFlow(c, flow, nil, true)
+		return
+	}
 	authCode, err := h.authorizeAndGenerateCode(ctx, flow)
 	if err != nil {
 		h.errorResponse(c, err)
 		return
 	}
-	h.issueSSOCookie(c, ctx, flow)
-	clearAuthSessionCookie(c)
-	browserRedirect(c, buildAuthCodeRedirectURL(flow.Request.RedirectURI, authCode))
+	h.respondFlow(c, flow, authCode, true)
 }
 
 // --- Challenge ---
@@ -573,8 +453,8 @@ func (h *Handler) ContinueChallenge(c *gin.Context) {
 // GetIdentifyContext GET /api/binding
 // 获取识别到的已有用户信息（前端关联确认页展示用）
 func (h *Handler) GetIdentifyContext(c *gin.Context) {
-	flowID, err := getAuthSessionCookie(c)
-	if err != nil || flowID == "" {
+	flowID := getAuthSessionCookie(c)
+	if flowID == "" {
 		h.errorResponse(c, autherrors.NewFlowNotFound("missing session"))
 		return
 	}
@@ -611,101 +491,40 @@ func (h *Handler) ConfirmIdentify(c *gin.Context) {
 		h.errorResponse(c, autherrors.NewInvalidRequest(err.Error()))
 		return
 	}
-
-	flowID, err := getAuthSessionCookie(c)
-	if err != nil || flowID == "" {
-		h.errorResponse(c, autherrors.NewFlowNotFound("missing session"))
-		return
-	}
-
 	ctx := c.Request.Context()
-
-	flow := h.authenticateSvc.GetAndValidateFlow(ctx, flowID)
-	if flow.Failed() {
-		h.flowErrorResponse(c, flow)
+	flow, err := h.loadFlow(ctx, getAuthSessionCookie(c))
+	if err != nil {
+		h.respondFlowError(c, flow, err)
 		return
 	}
-
-	// defer 统一持久化 flow
-	defer func() {
-		if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-			logger.Warnf("[Handler] 保存 flow 失败: %v", err)
-		}
-	}()
-
+	defer h.saveFlow(ctx, flow)
 	if !flow.IdentifiedUser() {
 		h.errorResponse(c, autherrors.NewInvalidRequest("no identified user"))
 		return
 	}
-
 	if !req.Confirm {
-		// 用户取消关联 → 清除中间态，回到登录页重新选择
 		flow.User = nil
-		actionRedirect(c, buildActionURL(nil))
+		h.respondFlow(c, flow, nil, false)
 		return
 	}
-
-	// 用户确认关联 → 将新 IDP 身份关联到已有用户
-	connection := flow.Connection
-	identity := flow.GetIdentity(connection)
-	if identity == nil {
-		h.errorResponse(c, autherrors.NewServerError("identity not found in flow"))
+	if err := h.linkIdentifiedUser(ctx, flow); err != nil {
+		h.errorResponse(c, err)
 		return
 	}
-
-	identifiedUser := flow.User
-
-	now := time.Now()
-	newIdentity := &models.UserIdentity{
-		Domain:    identity.Domain,
-		IDP:       identity.IDP,
-		TOpenID:   identity.TOpenID,
-		UID:       identifiedUser.OpenID,
-		RawData:   identity.RawData,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	if err := h.userSvc.LinkIdentity(ctx, newIdentity); err != nil {
-		logger.Errorf("[Handler] Account Linking 失败: %v", err)
-		h.errorResponse(c, autherrors.NewServerError("identity linking failed"))
-		return
-	}
-
-	logger.Infof("[Handler] Account Linking 成功 - OpenID: %s, Connection: %s", identifiedUser.OpenID, connection)
-
-	// 获取关联后的全部身份，完成登录流程
-	allIdentities, err := h.userSvc.ListIdentitiesByIdentity(ctx, newIdentity)
-	if err != nil {
-		h.errorResponse(c, autherrors.NewServerError("failed to load identities"))
-		return
-	}
-
-	// 回写到 flow，设置为已认证
-	flow.Identities = allIdentities
-	flow.SetAuthenticated(identifiedUser)
-
-	// 授权并生成授权码
-	authCode, err := h.authorizeAndGenerateCode(ctx, flow)
+	code, err := h.authorizeAndGenerateCode(ctx, flow)
 	if err != nil {
 		h.errorResponse(c, err)
 		return
 	}
-
-	// 异步更新最后登录时间
-	openid := identifiedUser.OpenID
-	h.pool.GoWithContext(ctx, func(ctx context.Context) {
-		if err := h.userSvc.UpdateLastLogin(ctx, openid); err != nil {
-			logger.Warnf("[Handler] 异步更新登录时间失败: %v", err)
-		}
-	})
-
-	// 签发 SSO Token
-	h.issueSSOCookie(c, ctx, flow)
-
-	// 构建最终重定向
-	clearAuthSessionCookie(c)
-	actionRedirect(c, buildAuthCodeRedirectURL(flow.Request.RedirectURI, authCode))
+	if flow.State == types.FlowStateCompleted {
+		openID := flow.User.OpenID
+		h.pool.GoWithContext(ctx, func(ctx context.Context) {
+			if err := h.userSvc.UpdateLastLogin(ctx, openID); err != nil {
+				logger.Warnf("[Handler] 异步更新登录时间失败: %v", err)
+			}
+		})
+	}
+	h.respondFlow(c, flow, code, false)
 }
 
 // --- Token ---
@@ -873,30 +692,21 @@ func (h *Handler) PublicKeys(c *gin.Context) {
 	c.JSON(http.StatusOK, publicKey)
 }
 
-func (h *Handler) consumeOAuthCallbackTransaction(c *gin.Context) (string, string, *idp.OAuthTransaction, bool) {
-	connection := c.Param("connection")
+func (h *Handler) consumeOAuthCallbackTransaction(ctx context.Context, connection, flowID, state string) (*idp.OAuthTransaction, error) {
 	if !idp.IsOAuthRedirectConnection(connection) {
-		h.errorResponse(c, autherrors.NewInvalidRequest("unsupported oauth connection"))
-		return "", "", nil, false
+		return nil, autherrors.NewInvalidRequest("unsupported oauth connection")
 	}
-
-	flowID, err := getAuthSessionCookie(c)
-	if err != nil || flowID == "" {
-		h.errorResponse(c, autherrors.NewFlowNotFound("missing session"))
-		return "", "", nil, false
+	if flowID == "" {
+		return nil, autherrors.NewFlowNotFound("missing session")
 	}
-
-	state := c.Query("state")
-	transaction, err := h.authenticateSvc.ConsumeOAuthTransaction(c.Request.Context(), state)
+	transaction, err := h.authenticateSvc.ConsumeOAuthTransaction(ctx, state)
 	if err != nil {
-		h.errorResponse(c, autherrors.NewInvalidRequest("invalid or expired oauth state"))
-		return "", "", nil, false
+		return nil, autherrors.NewInvalidRequest("invalid or expired oauth state")
 	}
 	if transaction.FlowID != flowID || transaction.Connection != connection {
-		h.errorResponse(c, autherrors.NewInvalidRequest("oauth transaction mismatch"))
-		return "", "", nil, false
+		return nil, autherrors.NewInvalidRequest("oauth transaction mismatch")
 	}
-	return connection, flowID, transaction, true
+	return transaction, nil
 }
 
 func (h *Handler) clientTokenFromRequest(c *gin.Context) (*pkgtoken.ClientToken, error) {
@@ -931,11 +741,15 @@ func (h *Handler) openIDFromRequestOrSSOCookie(c *gin.Context, app *models.Appli
 	if openID := h.openIDFromRequest(c); openID != "" {
 		return openID
 	}
-	ssoToken, _ := h.resolveSSO(c, c.Request.Context(), app)
-	if ssoToken != nil {
-		return ssoToken.GetOpenID(app.DomainID)
+	raw := getSSOCookie(c)
+	if raw == "" {
+		return ""
 	}
-	return ""
+	sso, err := h.verifySSOToken(c.Request.Context(), raw)
+	if err != nil {
+		return ""
+	}
+	return sso.GetOpenID(app.DomainID)
 }
 
 func (h *Handler) revokeAndClearSSO(c *gin.Context, openID string) {
@@ -1054,152 +868,10 @@ func buildServiceInfo(service *models.Service, application *models.Application) 
 	}
 }
 
-// trySSOFastPath 尝试 SSO 快速路径：如果用户有有效 SSO 会话，直接签发授权码并重定向。
-// 返回 true 表示已处理（成功重定向），false 表示需要走正常登录流程。
-func (h *Handler) trySSOFastPath(c *gin.Context, ctx context.Context, flow *types.AuthFlow) bool {
-	ssoToken, ssoUser := h.resolveSSO(c, ctx, flow.Application)
-	if ssoUser == nil {
-		return false
-	}
-
-	flow.User = ssoUser
-	flow.SetAuthenticated(ssoUser)
-
-	for conn, cfg := range flow.ConnectionMap {
-		if cfg.Type == types.ConnTypeIDP {
-			flow.SetConnection(conn)
-			break
-		}
-	}
-	logger.Debugf("[Handler] SSO 快速路径 - Connection: %s, User: %s", flow.Connection, flow.User.OpenID)
-
-	authCode, err := h.authorizeAndGenerateCode(ctx, flow)
-	if err != nil {
-		logger.Warnf("[Handler] SSO 授权失败: %v", err)
-		return false
-	}
-
-	if err := h.authenticateSvc.SaveFlow(ctx, flow); err != nil {
-		logger.Warnf("[Handler] SSO flow 保存失败: %v", err)
-		return false
-	}
-
-	h.renewSSOCookie(c, ctx, ssoToken)
-	actionRedirect(c, buildAuthCodeRedirectURL(flow.Request.RedirectURI, authCode))
-	return true
-}
-
-// resolveSSO 验证 SSO cookie 并恢复用户
-// 返回 ssoToken 和 user，任一为 nil 表示 SSO 不可用
-func (h *Handler) resolveSSO(c *gin.Context, ctx context.Context,
-	app *models.Application,
-) (*token.SSOToken, *models.UserWithDecrypted) {
-	ssoTokenString, err := getSSOCookie(c)
-	if err != nil || ssoTokenString == "" {
-		return nil, nil
-	}
-
-	logger.Debugf("[Handler] resolveSSO: SSO cookie found")
-
-	t, err := h.tokenSvc.Verify(ctx, ssoTokenString)
-	if err != nil {
-		logger.Debugf("[Handler] SSO token 验证失败: %v", err)
-		clearSSOCookie(c)
-		return nil, nil
-	}
-	ssoToken, ok := t.(*token.SSOToken)
-	if !ok {
-		logger.Debugf("[Handler] SSO token 类型不匹配: %T", t)
-		clearSSOCookie(c)
-		return nil, nil
-	}
-
-	openID := ssoToken.GetOpenID(app.DomainID)
-	if openID == "" {
-		logger.Debugf("[Handler] SSO token 中无域 %s 的身份", app.DomainID)
-		return nil, nil
-	}
-
-	user, err := h.userSvc.GetUser(ctx, openID)
-	if err != nil {
-		logger.Debugf("[Handler] SSO 用户查找失败: domain=%s, openID=%s, err=%v", app.DomainID, openID, err)
-		return nil, nil
-	}
-
-	if !user.IsActive() {
-		logger.Infof("[Handler] SSO 用户已禁用: domain=%s, openID=%s", app.DomainID, user.OpenID)
-		return nil, nil
-	}
-
-	return ssoToken, user
-}
-
-// renewSSOCookie 续期 SSO Token（重新签发新 token 并更新 cookie，保留全部域身份）
-func (h *Handler) renewSSOCookie(c *gin.Context, ctx context.Context, oldSSO *token.SSOToken) {
-	sso := pkgtoken.NewClaimsBuilder().
-		Issuer(token.SSOIssuer).
-		ClientID(token.SSOIssuer).
-		Audience(token.SSOAudience).
-		ExpiresIn(config.GetSSOTTL()).
-		Build(token.NewSSOTokenBuilder().
-			Identities(oldSSO.GetIdentities()))
-
-	tokenString, err := h.tokenSvc.Issue(ctx, sso)
-	if err != nil {
-		logger.Warnf("[Handler] SSO token 续期失败: %v", err)
-		return
-	}
-	setSSOCookie(c, tokenString)
-}
-
 // --- Login 引用链 ---
 
-// authenticate 执行认证流程
-// 返回 (true, nil) 表示 IDP 认证通过，可继续 resolveUser
-// 返回 (false, nil) 表示已通过 redirect 响应（vchan/factor 完成 或 前置条件未满足）
-// 返回 (false, error) 表示认证失败
-func (h *Handler) authenticate(c *gin.Context, ctx context.Context, flow *types.AuthFlow, req *LoginRequest) (bool, error) {
-	connCfg := flow.GetCurrentConnConfig()
-	if connCfg == nil {
-		return false, autherrors.NewInvalidRequestf("unknown connection: %s", flow.Connection)
-	}
-
-	if !connCfg.Verified {
-		if actions := unmetRequirements(flow); len(actions) > 0 {
-			logger.Infof("[Login] 待满足的条件: %v", actions)
-			actionRedirect(c, buildActionURL(actions))
-			return false, nil
-		}
-
-		success, err := h.authenticateSvc.Authenticate(ctx, flow, req.Proof, req.Principal, req.Strategy, req.UID)
-		if err != nil {
-			return false, err
-		}
-		if !success {
-			return false, autherrors.NewInvalidCredentials("authentication failed")
-		}
-		logger.Infof("[Handler] 认证通过 - FlowID: %s, Connection: %s", flow.ID, req.Connection)
-	} else {
-		logger.Infof("[Handler] Login 跳过认证（已验证） - FlowID: %s, Connection: %s", flow.ID, req.Connection)
-	}
-
-	// vchan / factor：只标记 Verified，不产生 identity，redirect 回登录页
-	if connCfg.Type != types.ConnTypeIDP {
-		actionRedirect(c, config.GetEndpointLogin())
-		return false, nil
-	}
-
-	// IDP 前置验证未全部通过
-	if actions := unmetRequirements(flow); len(actions) > 0 {
-		actionRedirect(c, buildActionURL(actions))
-		return false, nil
-	}
-
-	return true, nil
-}
-
 // resolveUser 解析用户信息并回写到 flow
-// 返回 errIdentifiedUser 表示识别到已有用户，需前端确认关联
+// 识别到已有用户时保留 Initialized 状态，由外层进入账户关联交互。
 func (h *Handler) resolveUser(ctx context.Context, flow *types.AuthFlow) error {
 	connection := flow.Connection
 	domain := flow.Application.DomainID
@@ -1224,7 +896,7 @@ func (h *Handler) resolveUser(ctx context.Context, flow *types.AuthFlow) error {
 			flow.User = existingUser
 			logger.Infof("[Handler] Account Linking: 识别到已有用户 - Domain: %s, OpenID: %s, Connection: %s",
 				domain, existingUser.OpenID, connection)
-			return errIdentifiedUser
+			return nil
 		}
 
 		// 未找到已有用户，检查该 IDP 是否在域的 IDP 配置中（有配置即允许）
@@ -1312,13 +984,13 @@ func (h *Handler) issueSSOCookie(c *gin.Context, ctx context.Context, flow *type
 
 	domainID := flow.Application.DomainID
 
-	// 尝试读取已有 SSO Token 中的身份
+	// 合并已有 SSO 身份，优先复用当前 flow 已验签的 SSO
 	identities := make(map[string]string)
-	if existingToken, err := getSSOCookie(c); err == nil && existingToken != "" {
-		if t, err := h.tokenSvc.Verify(ctx, existingToken); err == nil {
-			if oldSSO, ok := t.(*token.SSOToken); ok {
-				identities = oldSSO.GetIdentities()
-			}
+	if len(flow.SSO) > 0 {
+		maps.Copy(identities, flow.SSO)
+	} else if raw := getSSOCookie(c); raw != "" {
+		if oldSSO, err := h.verifySSOToken(ctx, raw); err == nil {
+			identities = oldSSO.GetIdentities()
 		}
 	}
 
@@ -1463,21 +1135,6 @@ func (h *Handler) handleMainVerification(c *gin.Context, ctx context.Context, ch
 		ChallengeToken: tokenStr,
 		ExpiresIn:      int(ch.ExpiresIn().Seconds()),
 	})
-}
-
-func (h *Handler) loadAuthFlow(c *gin.Context, ctx context.Context) *types.AuthFlow {
-	flowID, err := getAuthSessionCookie(c)
-	if err != nil || flowID == "" {
-		h.errorResponse(c, autherrors.NewFlowNotFound("missing session"))
-		return nil
-	}
-
-	flow := h.authenticateSvc.GetAndValidateFlow(ctx, flowID)
-	if flow.Failed() {
-		h.flowErrorResponse(c, flow)
-		return nil
-	}
-	return flow
 }
 
 func (h *Handler) saveFlow(ctx context.Context, flow *types.AuthFlow) {
@@ -1747,16 +1404,6 @@ func (h *Handler) errorResponse(c *gin.Context, err error) {
 	}
 }
 
-// authorizeErrorResponse authorize 接口专用错误响应
-// 返回 {"error": "...", "error_description": "..."}，符合 OAuth 2.0 规范
-func (h *Handler) authorizeErrorResponse(c *gin.Context, err error) {
-	authErr := autherrors.ToAuthError(err)
-	c.JSON(authErr.HTTPStatus, gin.H{
-		"error":             authErr.Code,
-		"error_description": authErr.Description,
-	})
-}
-
 // flowErrorResponse 从 AuthFlow 中提取错误并响应
 func (h *Handler) flowErrorResponse(c *gin.Context, flow *types.AuthFlow) {
 	if flow.Error == nil {
@@ -1813,8 +1460,12 @@ func clearAuthSessionCookie(c *gin.Context) {
 }
 
 // getAuthSessionCookie 获取 Auth 会话 Cookie
-func getAuthSessionCookie(c *gin.Context) (string, error) {
-	return c.Cookie(AuthSessionCookie)
+func getAuthSessionCookie(c *gin.Context) string {
+	value, err := c.Cookie(AuthSessionCookie)
+	if err != nil {
+		return ""
+	}
+	return value
 }
 
 // --- SSO Cookie ---
@@ -1847,38 +1498,15 @@ func clearSSOCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, cookie)
 }
 
-func getSSOCookie(c *gin.Context) (string, error) {
-	return c.Cookie(config.GetSSOCookieName())
+func getSSOCookie(c *gin.Context) string {
+	value, err := c.Cookie(config.GetSSOCookieName())
+	if err != nil {
+		return ""
+	}
+	return value
 }
 
 // --- 重定向与流程控制 ---
-
-// forwardNext 根据 AuthFlow 状态决定下一步重定向（统一使用 300 Multiple Choices）
-//
-// 根据 flow.State 决定跳转目标:
-//   - initialized -> login（需要登录）
-//   - authenticated -> consent（需要授权同意）
-//   - authorized/completed -> 跳转回应用
-//   - failed -> login（前端通过 /api/context 获取错误状态）
-func forwardNext(c *gin.Context, flow *types.AuthFlow) {
-	var targetURL string
-
-	switch flow.State {
-	case types.FlowStateAuthenticated:
-		targetURL = config.GetEndpointConsent()
-
-	case types.FlowStateAuthorized, types.FlowStateCompleted:
-		targetURL = flow.Request.RedirectURI
-
-	case types.FlowStateFailed:
-		targetURL = config.GetEndpointLogin()
-
-	default:
-		targetURL = config.GetEndpointLogin()
-	}
-
-	actionRedirect(c, targetURL)
-}
 
 // actionRedirect 发送 HTTP 300 Multiple Choices 指令式重定向
 // AJAX 请求不会自动跟随 300，前端通过 Location header 获取下一步指令
