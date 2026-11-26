@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,24 +18,27 @@ import (
 	"github.com/heliantheon/common/logger"
 )
 
-// prepareAuthorization 校验应用、回调、服务与连接配置并创建 AuthFlow。
+// prepareAuthorization 先校验基础参数，再查应用、回调白名单与授权范围并创建 AuthFlow。
 func (h *Handler) prepareAuthorization(ctx context.Context, req *types.AuthRequest) (*types.AuthFlow, error) {
+	if req.Audience == "" && len(req.Audiences) == 0 {
+		req.Audience = config.GetOIDCDefaultAudience()
+	}
 	if authErr := validateAuthorizeRequest(req); authErr != nil {
+		return nil, authErr
+	}
+	audiences, authErr := collectAudiences(req)
+	if authErr != nil {
 		return nil, authErr
 	}
 	app, err := h.provisionSvc.GetApplication(ctx, req.ClientID)
 	if err != nil {
 		return nil, autherrors.NewClientNotFoundf("application not found: %s", req.ClientID)
 	}
-	if !app.ValidateAllowedRedirectURI(req.RedirectURI) {
+	if !validAuthorizationRedirect(app, req.RedirectURI) {
 		return nil, autherrors.NewInvalidRequest("invalid redirect_uri")
 	}
 	flow := types.NewAuthFlow(req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
 	flow.Application = app
-	audiences, authErr := collectAudiences(req)
-	if authErr != nil {
-		return flow, authErr
-	}
 	services, authErr := h.validateAudiences(ctx, req.ClientID, audiences)
 	if authErr != nil {
 		return flow, authErr
@@ -195,10 +199,14 @@ func (h *Handler) linkIdentifiedUser(ctx context.Context, flow *types.AuthFlow) 
 }
 
 func (h *Handler) respondAuthorize(c *gin.Context, flow *types.AuthFlow, authCode *cache.AuthorizationCode) {
+	redirect := actionRedirect
+	if c.Request.Method == http.MethodGet {
+		redirect = browserRedirect
+	}
 	switch flow.State {
 	case types.FlowStateInitialized:
 		setAuthSessionCookie(c, flow.ID)
-		actionRedirect(c, config.GetEndpointLogin())
+		redirect(c, config.GetEndpointLogin())
 	case types.FlowStateCompleted:
 		if authCode == nil {
 			h.respondAuthorizeError(c, flow, autherrors.NewServerError("completed authentication has no authorization code"))
@@ -207,14 +215,18 @@ func (h *Handler) respondAuthorize(c *gin.Context, flow *types.AuthFlow, authCod
 		if len(flow.SSO) > 0 {
 			h.issueSSOCookie(c, c.Request.Context(), flow)
 		}
-		actionRedirect(c, buildAuthCodeRedirectURL(flow.Request.RedirectURI, authCode))
+		redirect(c, buildAuthCodeRedirectURL(flow.Request.RedirectURI, authCode))
 	default:
 		h.respondAuthorizeError(c, flow, autherrors.NewServerError("authentication flow has no response outcome"))
 	}
 }
 
-func (h *Handler) respondAuthorizeError(c *gin.Context, _ *types.AuthFlow, err error) {
+func (h *Handler) respondAuthorizeError(c *gin.Context, flow *types.AuthFlow, err error) {
 	authErr := autherrors.ToAuthError(err)
+	if c.Request.Method == http.MethodGet && flow != nil && flow.Application != nil {
+		browserRedirect(c, authorizationErrorURL(flow.Request.RedirectURI, flow.Request.State, authErr.Code, authErr.Description))
+		return
+	}
 	c.JSON(authErr.HTTPStatus, gin.H{"error": authErr.Code, "error_description": authErr.Description})
 }
 

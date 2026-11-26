@@ -90,12 +90,12 @@ type AuthorizeRequestBase struct {
 	CodeChallenge       string                 `json:"code_challenge" form:"code_challenge"`
 	CodeChallengeMethod string                 `json:"code_challenge_method" form:"code_challenge_method"`
 	State               string                 `json:"state,omitempty" form:"state"`
-	Scope               binding.SpaceDelimited `json:"scope,omitempty" form:"scope"`
+	Scope               binding.SpaceDelimited `json:"scope,omitempty" form:"scope,parser=encoding.TextUnmarshaler"`
 
 	// OIDC 扩展参数
-	Prompt    binding.SpaceDelimited `json:"prompt,omitempty" form:"prompt"`         // none, login, consent
-	Nonce     string                 `json:"nonce,omitempty" form:"nonce"`           // 防重放攻击
-	LoginHint string                 `json:"login_hint,omitempty" form:"login_hint"` // 登录提示（邮箱/手机）
+	Prompt    binding.SpaceDelimited `json:"prompt,omitempty" form:"prompt,parser=encoding.TextUnmarshaler"` // login
+	Nonce     string                 `json:"nonce,omitempty" form:"nonce"`                                   // 防重放攻击
+	LoginHint string                 `json:"login_hint,omitempty" form:"login_hint"`                         // 登录提示（邮箱/手机）
 }
 
 // AuthRequest 认证请求参数。具体流程由 audience/audiences 的实际数据形态决定。
@@ -106,7 +106,7 @@ type AuthRequest struct {
 	Audience string `json:"audience,omitempty" form:"audience"`
 
 	// 多 audience 扩展（授权阶段指定，token 交换时使用）
-	Audiences map[string]*RequestAudienceScope `json:"audiences,omitempty" form:"-"`
+	Audiences map[string]*RequestAudienceScope `json:"audiences,omitempty" form:"audiences"`
 
 	// 其他扩展参数 - 序列化时平铺到顶层
 	Params map[string]any `json:"-" form:"-"`
@@ -223,8 +223,11 @@ func (r *AuthRequest) GetString(key string) string {
 	return ""
 }
 
-// Set 设置扩展参数
+// Set 设置扩展参数，忽略标准字段。
 func (r *AuthRequest) Set(key string, value any) {
+	if authRequestKnownFields[key] {
+		return
+	}
 	if r.Params == nil {
 		r.Params = make(map[string]any)
 	}

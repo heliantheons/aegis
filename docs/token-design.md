@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-Aegis 使用 **PASETO v4 Public Token**（Ed25519 签名）作为统一凭证格式，定义了 5 种 Token 类型：
+Aegis 使用 **PASETO v4 Public Token**（Ed25519 签名）作为业务访问凭证格式，定义了以下 5 种 PASETO Token。OIDC ID Token 单独使用 RS256 JWT，见第 8 节；它面向登录客户端，独立于业务访问凭证。
 
 | 类型 | 标识 | 用途 | 签发方 | 验证方 | Footer | 加密数据 |
 |------|------|------|--------|--------|--------|----------|
@@ -309,7 +309,7 @@ kid    = h + base64url(d)    // 总长 51 字符
 
 ### 5.1 设计原则
 
-所有 Token 类型共享统一的 `Issue` 和 `Verify` 入口，通过接口多态区分行为差异：
+以下 PASETO Token 类型共享 `Issue` 和 `Verify` 入口，通过接口多态区分行为差异；JWT ID Token 使用独立的 `IssueIDToken` 入口。
 
 - **签发差异**由 `encryptableToken` 接口决定：实现该接口的 Token（UAT、SSO）会将 payload 加密到 sub 字段；未实现的（SAT、XAT）直接签名
 - **验证差异**由 `decryptableToken` 接口决定：实现该接口的 Token 在验签后自动解密 sub 并填充数据
@@ -425,3 +425,44 @@ d. 匹配成功 → ParseV4Public 验签
 - `middleware.Preflight` 和 `middleware.CORS` 是独立中间件：前者只处理同时包含 OPTIONS、Origin 和 Access-Control-Request-Method 的完整预检，后者只校验实际请求的来源并生成响应头。静态来源场景在路由上按 `Preflight(options)`、`CORS(options)` 顺序组合；不使用模式布尔值。token/revoke 只挂载通用 POST 预检，实际请求在验证客户端后调用 `AllowOrigin` 检查应用策略，拒绝来源返回 403。跨域中间件不解析请求体、`client_id` 或应用缓存；允许响应暴露 `Location`、`WWW-Authenticate` 和 `X-Trace-ID`。
 - 元数据和公钥是公开信息；`/api/pubkeys` 保留任意来源读取及公共缓存，不开放跨域凭证。`middleware.NoStore` 在处理器执行前设置 `Cache-Control: no-store` 和 `Pragma: no-cache`，覆盖认证会话、账户管理、token、撤销和 Bearer 权限检查的成功、错误及跳转响应。`middleware.NoReferrer` 用于授权入口及上游身份提供方回调。
 - `middleware.ProtectCookieRequests` 保护登录组 Cookie 状态变更接口。明确受信任 Origin 即使携带 `Sec-Fetch-Site: cross-site` 也允许；不可信 Origin 即使标为 same-site/same-origin 也拒绝。Origin 缺省时保留同源 Fetch Metadata 或可信 Referer 回退；缺少来源依据返回 403。GET、HEAD 和 OPTIONS 沿用路由行为。token 交换、显式 token 撤销和 Bearer 管理接口不挂载此防护；上游回调继续使用现有交易校验。
+
+## 8. 标准 OIDC 登录与 ID Token
+
+### 8.1 协议边界
+
+- Issuer 为 Aegis 的 HTTPS `endpoint + /api`；ID Token 的 `aud` 为登录应用的 `client_id`。
+- 使用 Authorization Code + PKCE S256。请求 `openid` scope 时，授权码兑换同时返回标准 JWT `id_token` 和原有 PASETO `access_token`。
+- ID Token 使用独立 RSA 密钥和 RS256 签名，JOSE header 包含 `kid`。`iat`、`exp` 使用 Unix 秒，`nonce` 原样关联授权请求。
+- `profile` 对应 `nickname`、`picture`，`email` 对应 `email`，`phone` 对应 `phone_number`；仅返回已授予 scope 对应的资料。
+- UAT/SAT/CT 的格式、claims、域签名、嵌套加密和 Go guard 解析契约保持原样。ID Token 不进入 PASETO 的构建或类型检测链路。
+
+### 8.2 公开端点
+
+| 端点（相对 issuer） | 行为 |
+| --- | --- |
+| `GET /.well-known/openid-configuration` | 返回 issuer、标准端点（`userinfo_endpoint` 指向 `/profile`）、签名算法和支持的协议能力 |
+| `GET /jwks` | 返回当前及轮换中的 RSA 公钥 JWK，不返回私钥 |
+| `GET /authorize` | 标准浏览器授权入口，读取 query，使用浏览器跳转，不开放 CORS |
+| `POST /authorize` | 保留 Pallas 授权 API，读取 JSON 或 URL-encoded form body，返回 HTTP 300 + Location 或 JSON 错误；沿用可信登录前端的 CORS 和 Cookie 来源防护 |
+| `POST /token` | 接收标准 form 授权码和刷新请求；保留已有多 audience 扩展 |
+
+未指定 audience 的标准登录请求使用 `oidc.default-audience`（默认 Iris）；仍执行现有应用服务关系校验。用户资料读取统一复用现有 `GET /api/profile`（Iris Bearer Token），不单独维护 `/userinfo` 端点。
+
+`GET /api/authorize` 和 `POST /api/authorize` 统一挂载 `Authorize`。GET 只读取 query，POST 只读取 body；参数绑定与静态基础校验（`redirect_uri` 语法、`response_type`、`S256`、`prompt`、`audience`/`audiences`）均在查询应用前完成，失败立即返回本地 HTTP 400 JSON、不查询应用、不回跳。通过基础校验后再查应用及 `redirect_uri` 白名单，之后的授权范围与连接配置错误在 GET 下回跳客户端。POST 保留 Pallas 的 API 契约：下一步通过 HTTP 300 + `Location` 交给前端执行，授权错误返回本地 JSON。
+
+授权参数复用 `AuthRequest` 的 form 标签进行绑定，`scope` 和 `prompt` 通过现有 `SpaceDelimited.UnmarshalText` 解析，`audiences` 通过 JSON 对象绑定；必填字段统一由 Gin 的 `binding` 标签校验，不在 handler 重复检查。query 和 URL-encoded form 绑定阶段检查参数唯一性与非空 `audiences`，query 与 body 的参数来源保持隔离。授权结果固定通过回调 URL 的 query 返回，不提供响应模式选择。
+
+因为所有接入应用均为自有应用，授权流程不引入用户同意页（`consent`）、静默登录（`prompt=none`）或 `max_age` / `auth_time` 校验；`prompt` 仅支持 `login`（忽略现有 SSO 会话，要求重新登录）。重定向 URI 精确匹配注册值，授权错误仅回到已验证的客户端 URI。
+### 8.3 密钥与迁移
+
+`oidc.signing-key` 为至少 RSA-2048 的 PKCS#1/PKCS#8 私钥 PEM，可通过 `AEGIS_OIDC_SIGNING_KEY` 注入。缺失或无效时启动失败。新环境初始化生成独立 RSA-3072 密钥，所有服务副本使用同一配置。
+
+签名配置在进程内缓存，修改或轮换后重启所有 Aegis 副本；先配置新私钥和旧公钥的组合，再等待旧 ID Token 过期后退役旧公钥。
+
+`oidc.verification-keys` 为轮换公钥 PKIX PEM 列表，保留旧公钥直到旧 ID Token 全部过期。`kid` 使用 RFC 7638 RSA JWK thumbprint，现有 PASETO `/pubkeys` 与 PASERK 标识保持原样。
+
+浏览器 SDK 使用 discovery/JWKS 验证 ID Token 的签名、issuer、client audience、到期时间和 nonce，在验证成功后提交登录状态。授权回调必须匹配保存的 state。前端用户字段迁移为标准 claim 名，时间按 Unix 秒解释。
+
+Aegis、SDK 和前端消费者需协调发布；旧 PASETO ID Token 验证路径会被移除，业务 Access Token、CT 和 Refresh Token 保留现有契约。
+
+

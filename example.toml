@@ -108,6 +108,14 @@ audience = "iris"
 # 由 scripts/initialize-hermes.py 生成。
 secret-key = ""
 
+[oidc]
+# 未传 audience 的标准 OIDC 请求使用此服务，仍需配置 application-service 关系。
+default-audience = "iris"
+# 由 environment/initialize.py 生成独立 RSA 私钥；部署可用 AEGIS_OIDC_SIGNING_KEY 注入 PEM。
+signing-key = ""
+# 轮换时保留旧 PKIX 公钥 PEM，直到旧 ID Token 全部过期。
+verification-keys = []
+
 [idps.google]
 redirect-uri = ""
 
