@@ -23,6 +23,7 @@ import (
 	"github.com/heliantheon/aegis/internal/authorize"
 	"github.com/heliantheon/aegis/internal/cache"
 	"github.com/heliantheon/aegis/internal/challenge"
+	"github.com/heliantheon/aegis/internal/provision"
 	"github.com/heliantheon/aegis/internal/token"
 	"github.com/heliantheon/aegis/internal/types"
 	"github.com/heliantheon/aegis/internal/user"
@@ -42,7 +43,7 @@ type Handler struct {
 	authorizeSvc    *authorize.Service
 	challengeSvc    *challenge.Service
 	userSvc         *user.Service
-	cache           *cache.Manager
+	provisionSvc    *provision.Service
 	tokenSvc        *token.Service
 	profileHandler  *profile.Handler
 	pool            *async.Pool
@@ -54,7 +55,7 @@ func NewHandler(
 	authorizeSvc *authorize.Service,
 	challengeSvc *challenge.Service,
 	userSvc *user.Service,
-	cache *cache.Manager,
+	provisionSvc *provision.Service,
 	tokenSvc *token.Service,
 	profileHandler *profile.Handler,
 	pool *async.Pool,
@@ -64,7 +65,7 @@ func NewHandler(
 		authorizeSvc:    authorizeSvc,
 		challengeSvc:    challengeSvc,
 		userSvc:         userSvc,
-		cache:           cache,
+		provisionSvc:    provisionSvc,
 		tokenSvc:        tokenSvc,
 		profileHandler:  profileHandler,
 		pool:            pool,
@@ -125,7 +126,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Debugf("[Handler] Authorize request: %+v", req)
 
-	app, err := h.cache.GetApplication(ctx, req.ClientID)
+	app, err := h.provisionSvc.GetApplication(ctx, req.ClientID)
 	if err != nil {
 		h.authorizeErrorResponse(c, autherrors.NewClientNotFoundf("application not found: %s", req.ClientID))
 		return
@@ -147,7 +148,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	idpConfigs, err := h.cache.ListApplicationIDPConfigs(ctx, req.ClientID)
+	idpConfigs, err := h.provisionSvc.ListApplicationIDPConfigs(ctx, req.ClientID)
 	if err != nil {
 		h.authorizeErrorResponse(c, autherrors.NewServerError("query idp configs failed"))
 		return
@@ -158,7 +159,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 	}
 
 	flow := types.NewAuthFlow(&req, time.Duration(config.GetCookieMaxAge())*time.Second, config.GetAuthFlowMaxLifetime())
-	flow.Application = &app.Application
+	flow.Application = app
 	if len(req.Audiences) > 0 {
 		flow.Services = services
 	} else {
@@ -391,7 +392,7 @@ func (h *Handler) IDPs(c *gin.Context) {
 			h.errorResponse(c, autherrors.NewServerError("oauth authorization URL is invalid"))
 			return
 		}
-		if err := h.cache.SaveOAuthTransaction(ctx, initiation.Transaction, config.GetOAuthStateExpiresIn()); err != nil {
+		if err := h.authenticateSvc.SaveOAuthTransaction(ctx, initiation.Transaction, config.GetOAuthStateExpiresIn()); err != nil {
 			h.errorResponse(c, autherrors.NewServerError("save oauth transaction failed"))
 			return
 		}
@@ -498,7 +499,7 @@ func (h *Handler) InitiateChallenge(c *gin.Context) {
 	}
 
 	// 1. 获取 ServiceChallengeSetting
-	setting, err := h.cache.GetServiceChallengeSetting(ctx, req.Audience, req.Type)
+	setting, err := h.challengeSvc.GetServiceChallengeSetting(ctx, req.Audience, req.Type)
 	if err != nil {
 		h.errorResponse(c, autherrors.NewInvalidRequestf("challenge type %q is not configured for service %s", req.Type, req.Audience))
 		return
@@ -789,7 +790,7 @@ func (h *Handler) Revoke(c *gin.Context) {
 	}
 
 	if c.GetHeader("Origin") != "" {
-		refreshToken, err := h.cache.GetRefreshToken(c.Request.Context(), req.Token)
+		refreshToken, err := h.authorizeSvc.GetRefreshToken(c.Request.Context(), req.Token)
 		if err != nil {
 			c.Status(http.StatusOK)
 			return
@@ -804,7 +805,7 @@ func (h *Handler) Revoke(c *gin.Context) {
 	}
 
 	// RFC 7009: 即使 token 无效，也应返回 200
-	if err := h.cache.DelRefreshToken(c.Request.Context(), req.Token); err != nil {
+	if err := h.authorizeSvc.RevokeRefreshToken(c.Request.Context(), req.Token); err != nil {
 		logger.Warnf("[Handler] revoke token failed: %v", err)
 	}
 	c.Status(http.StatusOK)
@@ -826,7 +827,7 @@ func (h *Handler) LogoutGET(c *gin.Context) {
 		return
 	}
 
-	app, err := h.cache.GetApplication(c.Request.Context(), clientID)
+	app, err := h.provisionSvc.GetApplication(c.Request.Context(), clientID)
 	if err != nil {
 		logger.Warnf("[Handler] LogoutGET app not found: %v", err)
 		c.Redirect(http.StatusFound, "/")
@@ -845,7 +846,7 @@ func (h *Handler) LogoutGET(c *gin.Context) {
 		return
 	}
 
-	h.revokeAndClearSSO(c, h.openIDFromRequestOrSSOCookie(c, &app.Application))
+	h.revokeAndClearSSO(c, h.openIDFromRequestOrSSOCookie(c, app))
 
 	c.Redirect(http.StatusFound, redirectURL)
 }
@@ -886,7 +887,7 @@ func (h *Handler) consumeOAuthCallbackTransaction(c *gin.Context) (string, strin
 	}
 
 	state := c.Query("state")
-	transaction, err := h.cache.ConsumeOAuthTransaction(c.Request.Context(), state)
+	transaction, err := h.authenticateSvc.ConsumeOAuthTransaction(c.Request.Context(), state)
 	if err != nil {
 		h.errorResponse(c, autherrors.NewInvalidRequest("invalid or expired oauth state"))
 		return "", "", nil, false
@@ -939,7 +940,7 @@ func (h *Handler) openIDFromRequestOrSSOCookie(c *gin.Context, app *models.Appli
 
 func (h *Handler) revokeAndClearSSO(c *gin.Context, openID string) {
 	if openID != "" {
-		if err := h.cache.DelUserRefreshTokens(c.Request.Context(), openID); err != nil {
+		if err := h.authorizeSvc.RevokeUserRefreshTokens(c.Request.Context(), openID); err != nil {
 			logger.Warnf("[Handler] logout revoke tokens failed: %v", err)
 		}
 	}
@@ -984,7 +985,7 @@ func collectAudiences(req *types.AuthRequest) ([]string, *autherrors.AuthError) 
 }
 
 func (h *Handler) validateAudiences(ctx context.Context, clientID string, audiences []string) ([]models.Service, *autherrors.AuthError) {
-	relations, err := h.cache.GetAppServiceRelations(ctx, clientID)
+	relations, err := h.provisionSvc.GetAppServiceRelations(ctx, clientID)
 	if err != nil {
 		return nil, autherrors.NewServerError("check relation failed")
 	}
@@ -995,14 +996,14 @@ func (h *Handler) validateAudiences(ctx context.Context, clientID string, audien
 
 	services := make([]models.Service, 0, len(audiences))
 	for _, aud := range audiences {
-		s, err := h.cache.GetService(ctx, aud)
+		s, err := h.provisionSvc.GetService(ctx, aud)
 		if err != nil {
 			return nil, autherrors.NewServiceNotFoundf("service not found: %s", aud)
 		}
 		if !allowedSet[aud] {
 			return nil, autherrors.NewAccessDeniedf("application %s has no access to service %s", clientID, aud)
 		}
-		services = append(services, s.Service)
+		services = append(services, *s)
 	}
 	return services, nil
 }
@@ -1227,7 +1228,7 @@ func (h *Handler) resolveUser(ctx context.Context, flow *types.AuthFlow) error {
 		}
 
 		// 未找到已有用户，检查该 IDP 是否在域的 IDP 配置中（有配置即允许）
-		domainIDPConfigs, err := h.cache.ListDomainIDPConfigs(ctx, domain)
+		domainIDPConfigs, err := h.provisionSvc.ListDomainIDPConfigs(ctx, domain)
 		if err != nil {
 			return fmt.Errorf("get domain idp configs: %w", err)
 		}
@@ -1610,7 +1611,7 @@ func (h *Handler) allowClientOrigin(c *gin.Context, clientID string) bool {
 	if clientID == "" {
 		return middleware.AllowOrigin(c, nil)
 	}
-	app, err := h.cache.GetApplication(c.Request.Context(), clientID)
+	app, err := h.provisionSvc.GetApplication(c.Request.Context(), clientID)
 	if err != nil {
 		return middleware.AllowOrigin(c, nil)
 	}

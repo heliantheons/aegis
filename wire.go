@@ -27,6 +27,7 @@ import (
 	"github.com/heliantheon/aegis/internal/cache"
 	"github.com/heliantheon/aegis/internal/challenge"
 	internalmfa "github.com/heliantheon/aegis/internal/mfa"
+	"github.com/heliantheon/aegis/internal/provision"
 	"github.com/heliantheon/aegis/internal/token"
 	"github.com/heliantheon/aegis/internal/user"
 	"github.com/heliantheon/aegis/profile"
@@ -77,13 +78,14 @@ func initializeAegis(hermesClient *hermes.Client, cacheManager *cache.Manager) (
 		return nil, err
 	}
 
+	provisionSvc := provision.NewService(cacheManager)
 	userService := user.NewService(cacheManager, hermesClient)
 	authenticateSvc := authenticate.NewService(cacheManager, ac)
 	authorizeSvc := authorize.NewService(cacheManager, hermesClient, userService, tokenSvc, pool, 5*time.Minute)
 	challengeSvc := challenge.NewService(cacheManager, registry)
 	profileHandler := profile.NewHandler(hermesClient, mfaSvc)
 
-	handler := auth.NewHandler(authenticateSvc, authorizeSvc, challengeSvc, userService, cacheManager, tokenSvc, profileHandler, pool)
+	handler := auth.NewHandler(authenticateSvc, authorizeSvc, challengeSvc, userService, provisionSvc, tokenSvc, profileHandler, pool)
 	logger.Info("[Auth] 模块初始化完成")
 	return handler, nil
 }

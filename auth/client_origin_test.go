@@ -20,6 +20,7 @@ import (
 	"github.com/heliantheon/aegis/config"
 	"github.com/heliantheon/aegis/internal/authorize"
 	"github.com/heliantheon/aegis/internal/cache"
+	"github.com/heliantheon/aegis/internal/provision"
 	hermesv1 "github.com/heliantheon/aegis/internal/rpc/hermes/v1"
 	"github.com/heliantheon/aegis/rpc/hermes"
 	pkgredis "github.com/heliantheon/common/redis"
@@ -110,7 +111,7 @@ func originFixture(t *testing.T) (*Handler, *originRedis, *originHermesConn) {
 	manager := cache.NewManager(client, redis)
 	t.Cleanup(manager.Close)
 	return &Handler{
-		cache:        manager,
+		provisionSvc: provision.NewService(manager),
 		authorizeSvc: authorize.NewService(manager, client, nil, nil, nil, time.Minute),
 	}, redis, conn
 }
