@@ -725,32 +725,26 @@ func (s *Service) generateAccessToken(
 	}, nil
 }
 
-// generateIDToken 签发 OIDC ID Token（v4.public，域密钥签名，不加密）
-// aud = client_id（OIDC Core §2: id_token 的 audience 是 relying party 的 client_id）
+// generateIDToken 使用独立的 OIDC JWT 签发路径，aud 为登录客户端。
 func (s *Service) generateIDToken(ctx context.Context, flow *types.AuthFlow) (string, error) {
-	scopes := parseScopeSet(strings.Join(flow.GrantedScopes, " "))
-
-	idtBuilder := token.NewIDTokenBuilder()
-
-	if scopes[ScopeProfile] {
-		idtBuilder.Nickname(flow.User.GetNickname()).Picture(flow.User.GetPicture())
-	}
-	if flow.Request.Nonce != "" {
-		idtBuilder.Nonce(flow.Request.Nonce)
-	}
-
 	idTokenExpiresIn := uintSecToDuration(flow.Application.IDTokenExpiresIn)
 	if idTokenExpiresIn == 0 {
 		idTokenExpiresIn = time.Hour
 	}
-	idt := token.NewClaimsBuilder().
-		Issuer(s.tokenSvc.GetIssuer()).
-		Subject(flow.User.OpenID).
-		Audience(flow.Application.AppID).
-		ExpiresIn(idTokenExpiresIn).
-		Build(idtBuilder)
-
-	return s.tokenSvc.Issue(ctx, idt)
+	claims := token.NewIDTokenClaims(flow.User.OpenID, flow.Application.AppID, idTokenExpiresIn)
+	claims.Nonce = flow.Request.Nonce
+	scopes := parseScopeSet(strings.Join(flow.GrantedScopes, " "))
+	if scopes[ScopeProfile] {
+		claims.Nickname = flow.User.GetNickname()
+		claims.Picture = flow.User.GetPicture()
+	}
+	if scopes[ScopeEmail] {
+		claims.Email = flow.User.GetEmail()
+	}
+	if scopes[ScopePhone] {
+		claims.PhoneNumber = flow.User.GetPhone()
+	}
+	return s.tokenSvc.IssueIDToken(ctx, claims)
 }
 
 func (s *Service) createRefreshToken(ctx context.Context, flow *types.AuthFlow, scope string) (*cache.RefreshToken, error) {

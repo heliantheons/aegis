@@ -92,6 +92,9 @@ func TestBuildAuthContextPreservesAudienceShape(t *testing.T) {
 			if err := json.Unmarshal(encoded, &fields); err != nil {
 				t.Fatalf("unmarshal context: %v", err)
 			}
+			if _, exposed := fields["request"]; exposed {
+				t.Fatalf("context exposes authorization request: %s", encoded)
+			}
 			_, hasService := fields["service"]
 			_, hasServices := fields["services"]
 			if hasService != test.wantService || hasServices != test.wantServices {
@@ -171,6 +174,13 @@ func TestValidateAuthorizeRequestUsesAudienceDataShape(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+			test.req.AuthorizeRequestBase = types.AuthorizeRequestBase{
+				ClientID:            "atlas",
+				RedirectURI:         "https://atlas.example.com/callback",
+				ResponseType:        "code",
+				CodeChallenge:       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				CodeChallengeMethod: "S256",
+			}
 			gotErr := validateAuthorizeRequest(&test.req)
 			if (gotErr != nil) != test.wantErr {
 				t.Fatalf("validateAuthorizeRequest() error = %v, wantErr %t", gotErr, test.wantErr)

@@ -76,6 +76,12 @@ func Validate() error {
 	if _, err := GetIrisSecretKeyBytes(); err != nil {
 		errs = append(errs, err)
 	}
+	if _, _, err := GetOIDCSigningKeys(); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateOIDCIssuer(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
