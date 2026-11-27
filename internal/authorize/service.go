@@ -406,6 +406,21 @@ func (s *Service) GetPublicKey(ctx context.Context, clientID string) (*PublicKey
 	}, nil
 }
 
+// GetRefreshToken 查询 Refresh Token 元数据。
+func (s *Service) GetRefreshToken(ctx context.Context, raw string) (*cache.RefreshToken, error) {
+	return s.cache.GetRefreshToken(ctx, raw)
+}
+
+// RevokeRefreshToken 撤销单个 Refresh Token。
+func (s *Service) RevokeRefreshToken(ctx context.Context, raw string) error {
+	return s.cache.DelRefreshToken(ctx, raw)
+}
+
+// RevokeUserRefreshTokens 撤销用户全部 Refresh Token。
+func (s *Service) RevokeUserRefreshTokens(ctx context.Context, openID string) error {
+	return s.cache.DelUserRefreshTokens(ctx, openID)
+}
+
 func (s *Service) authenticateCAT(ctx context.Context, requestedClientID, credential string) (string, error) {
 	if credential == "" {
 		return "", autherrors.NewInvalidClient("client authentication failed")

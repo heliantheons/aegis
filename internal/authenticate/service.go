@@ -9,6 +9,7 @@ import (
 	"github.com/heliantheon/aegis/config"
 	autherrors "github.com/heliantheon/aegis/errors"
 	"github.com/heliantheon/aegis/internal/authenticator"
+	"github.com/heliantheon/aegis/internal/authenticator/idp"
 	"github.com/heliantheon/aegis/internal/cache"
 	"github.com/heliantheon/aegis/internal/types"
 	"github.com/heliantheon/aegis/models"
@@ -156,6 +157,16 @@ func (s *Service) SetConnections(idpConfigs []*models.ApplicationIDPConfig) map[
 	// 将被引用的 Required/Delegated connections 也加入 ConnectionMap
 	s.addReferencedConnections(result, referencedSet)
 	return result
+}
+
+// SaveOAuthTransaction 保存一次性上游 OAuth 交易状态。
+func (s *Service) SaveOAuthTransaction(ctx context.Context, tx *idp.OAuthTransaction, ttl time.Duration) error {
+	return s.cache.SaveOAuthTransaction(ctx, tx, ttl)
+}
+
+// ConsumeOAuthTransaction 原子消费上游 OAuth 交易状态。
+func (s *Service) ConsumeOAuthTransaction(ctx context.Context, state string) (*idp.OAuthTransaction, error) {
+	return s.cache.ConsumeOAuthTransaction(ctx, state)
 }
 
 // buildConnectionConfig 构建单个 IDP 的 ConnectionConfig（合并应用级配置）

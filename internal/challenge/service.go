@@ -8,6 +8,7 @@ import (
 	"github.com/heliantheon/aegis/internal/authenticator"
 	"github.com/heliantheon/aegis/internal/cache"
 	"github.com/heliantheon/aegis/internal/types"
+	"github.com/heliantheon/aegis/models"
 	"github.com/heliantheon/common/logger"
 )
 
@@ -146,6 +147,11 @@ func (s *Service) GetAndValidate(ctx context.Context, challengeID string) (*type
 		return nil, autherrors.NewChallengeExpired("challenge expired")
 	}
 	return ch, nil
+}
+
+// GetServiceChallengeSetting 获取服务的 Challenge 配置。
+func (s *Service) GetServiceChallengeSetting(ctx context.Context, serviceID, challengeType string) (*models.ServiceChallengeSetting, error) {
+	return s.cache.GetServiceChallengeSetting(ctx, serviceID, challengeType)
 }
 
 // ==================== internal helpers ====================
