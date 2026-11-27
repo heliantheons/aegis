@@ -1,7 +1,5 @@
 package auth
 
-import "errors"
-
 // ==================== 常量 ====================
 
 const (
@@ -14,8 +12,3 @@ const (
 	// Cookie
 	AuthSessionCookie = "aegis-session" // Auth 会话 Cookie 名称
 )
-
-// ==================== 哨兵错误 ====================
-
-// errIdentifiedUser 内部哨兵错误：resolveUser 识别到已有用户，需前端确认关联
-var errIdentifiedUser = errors.New("identified existing user")
